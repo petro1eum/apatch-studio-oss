@@ -1,0 +1,8 @@
+include frontend/index.html
+include frontend/package.json frontend/package-lock.json
+include frontend/tsconfig*.json frontend/vite.config.ts
+recursive-include frontend/src *.ts *.tsx *.css *.json
+recursive-include frontend/public *.js *.svg *.png *.ico
+recursive-include frontend/dist *.html *.js *.css *.svg *.png *.ico
+prune frontend/node_modules
+global-exclude __pycache__ *.py[cod] *.tsbuildinfo

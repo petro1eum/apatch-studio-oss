@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "mode": "enforce",
+  "protected_globs": [
+    "apatch_studio/**",
+    "frontend/src/**",
+    "frontend/index.html",
+    "frontend/*.json",
+    "frontend/*.ts",
+    "tests/**",
+    "docs/**",
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "LICENSE",
+    "MANIFEST.in",
+    "pyproject.toml",
+    ".gitignore",
+    ".github/**"
+  ],
+  "allow_globs": [
+    "manifests/**",
+    "patches/**",
+    ".apatch/**",
+    ".trustchain/**",
+    ".git/**",
+    "patches.jsonl"
+  ],
+  "lease_max_seconds": 300,
+  "cursor_hooks": true,
+  "watcher": "revert",
+  "revert_untracked": true,
+  "mcp_extra_servers": [],
+  "enabled_at": "2026-09-14T00:00:00+00:00"
+}

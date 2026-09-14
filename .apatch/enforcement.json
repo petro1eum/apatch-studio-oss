@@ -1,0 +1,11 @@
+{
+  "mode": "strict",
+  "governed_mode": "strict",
+  "policy": "Every governed source change must be associated with verifiable Ed25519 evidence. Unsigned governed changes fail closed.",
+  "block_commit_without_proof": true,
+  "require_trustchain_on_apply": true,
+  "fail_apply_if_notarization_fails": true,
+  "incremental_notarization": true,
+  "require_ed25519_block_on_disk": true,
+  "enabled_at": "2026-09-14T00:00:00+00:00"
+}

@@ -1,0 +1,27 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+.DS_Store
+# apatch runtime (policy configs committed)
+.apatch/*
+!.apatch/sandbox.json
+!.apatch/enforcement.json
+# apatch ephemeral patch logs (generated)
+patches-*.jsonl
+patches.jsonl
+# apatch strip artifacts (local only)
+extracted/
+**/extraction_report.json
+.trustchain/
+# build metadata
+*.egg-info/
+# machine-local: absolute interpreter and workspace paths of one laptop.
+# The rest of .cursor (hooks, rules) is consumer scaffolding and stays tracked.
+.cursor/mcp.json
+# ephemeral run manifests (generated per spec run, never notarized)
+manifests/*.run.json

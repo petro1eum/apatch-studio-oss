@@ -1,0 +1,38 @@
+{
+  "schema": "apatch.studio.owner-rfp-freeze.v1",
+  "freeze_id": "apsddrfp_2d1e6723ab8c813c0dfd0ca096a34fba",
+  "rfp_id": "RFP-012",
+  "source_path": "docs/RFP-012-studio-user-needs-readiness.md",
+  "source_commit": null,
+  "source_hash": "sha256:14568070d1ee44e3f0ef33ae25932e631d8ed76b1ed05463de3c684b874039fa",
+  "accepted_at": "2026-09-14T00:00:00Z",
+  "authority": {
+    "kind": "local_owner",
+    "id": "APatch Studio owner"
+  },
+  "acceptance_ids": [
+    "SDD-1",
+    "SDD-2",
+    "SDD-3",
+    "SDD-4",
+    "SDD-5",
+    "SDD-6",
+    "SDD-7",
+    "SDD-8",
+    "SDD-9",
+    "SDD-10",
+    "SDD-11",
+    "SDD-12",
+    "SDD-13",
+    "SDD-14",
+    "SDD-15",
+    "SDD-16",
+    "SDD-17",
+    "SDD-18",
+    "SDD-19",
+    "SDD-20"
+  ],
+  "authorization": "executable_specification_authoring",
+  "source_implementation_allowed": true,
+  "note": "Public OSS adaptation accepted by the owner; every implementation run remains bound to its own exact verification-contract freeze."
+}

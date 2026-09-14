@@ -1,0 +1,35 @@
+{
+  "schema": "apatch.studio.product-vocabulary.v1",
+  "primary_surfaces": ["navigation", "actions", "empty_states", "status_badges"],
+  "expert_surface": "Proof",
+  "terms": [
+    {"protocol": "attest", "product": "verify"},
+    {"protocol": "attested", "product": "Verified"},
+    {"protocol": "notarize", "product": "record"},
+    {"protocol": "notarized", "product": "Recorded"},
+    {"protocol": "ratify", "product": "re-check policy gate"},
+    {"protocol": "inclusion proof", "product": "independent log check"},
+    {"protocol": "rebind", "product": "re-check"},
+    {"protocol": "stale", "product": "Needs re-check"},
+    {"protocol": "governed session", "product": "protected run"},
+    {"protocol": "execution intent", "product": "signed task"},
+    {"protocol": "WorkAsset", "product": "proven method"},
+    {"protocol": "artifact reference", "product": "backlog item"},
+    {"protocol": "doctor", "product": "runtime check"},
+    {"protocol": "hygiene", "product": "storage health"}
+  ],
+  "forbidden_primary_terms": [
+    "attest",
+    "attested",
+    "notarize",
+    "notarized",
+    "ratify",
+    "inclusion proof",
+    "rebind",
+    "stale",
+    "governed session",
+    "execution intent",
+    "workasset",
+    "artifact reference"
+  ]
+}

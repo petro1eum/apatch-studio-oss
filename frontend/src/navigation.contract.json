@@ -1,0 +1,28 @@
+{
+  "schema": "apatch.studio.navigation.v2",
+  "default_route": "home",
+  "targets": [
+    {"id": "home", "label": "Home", "availability": "all", "default_section": "feed", "sections": ["feed"], "primary_action": "Start", "terminal_states": ["proven", "attention", "stopped"], "recovery_actions": ["retry", "recover", "rollback_preview"]},
+    {"id": "backlog", "label": "Plans", "availability": "all", "default_section": "requirements", "sections": ["requirements"], "primary_action": "Open plan", "terminal_states": ["proven", "blocked"], "recovery_actions": ["recheck", "refresh"]},
+    {"id": "library", "label": "Library", "availability": "all", "default_section": "methods", "sections": ["methods", "proof", "time"], "primary_action": "Search", "terminal_states": ["complete", "empty"], "recovery_actions": ["refine", "verify"]},
+    {"id": "admin", "label": "Admin", "availability": "all", "default_section": "runtime", "sections": ["runtime", "workspaces", "rules"], "primary_action": "Check runtime", "terminal_states": ["ready", "attention"], "recovery_actions": ["cleanup", "refresh"]},
+    {"id": "inbox", "label": "Inbox", "availability": "configured", "default_section": "requests", "sections": ["requests"], "primary_action": "Run locally", "terminal_states": ["confirmed", "declined", "expired"], "recovery_actions": ["refresh", "decline"]}
+  ],
+  "legacy_routes": {
+    "work/runs": "home",
+    "work/start": "home",
+    "work": "home",
+    "start": "home",
+    "runs": "home",
+    "overview": "home",
+    "changes": "home",
+    "review": "home",
+    "specs": "backlog",
+    "specifications": "backlog",
+    "evidence": "library/proof",
+    "assets": "library/methods",
+    "policies": "admin/rules",
+    "settings": "admin/runtime",
+    "requests": "inbox"
+  }
+}
