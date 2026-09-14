@@ -1,0 +1,39 @@
+{
+  "schema": "apatch.studio.oss-publication.v1",
+  "version": "0.1.0",
+  "source_commit": "4a1d70f2e7b92f62fc0b595510c223886036a27b",
+  "public_candidate_commit": "3654a9c9fbcd3326092630643dbbc218f3abd606",
+  "artifacts": [
+    {
+      "filename": "apatch_studio-0.1.0-py3-none-any.whl",
+      "sha256": "4ae5cc3c16de081a2c343dbb0a3e05191c54e083cd89ab25e42dd6ead8c4a51b"
+    },
+    {
+      "filename": "apatch_studio-0.1.0.tar.gz",
+      "sha256": "d1b5e7496f3b9daa40587cbe678d2c6380309b2f677256ef53711260ee95b66c"
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm --prefix frontend run build",
+      "result": "passed"
+    },
+    {
+      "command": ".venv/bin/pytest -q",
+      "result": "passed: 622 tests"
+    },
+    {
+      "command": ".venv/bin/python -m build --outdir dist",
+      "result": "passed"
+    },
+    {
+      "command": ".venv/bin/python -m twine check dist/*",
+      "result": "passed"
+    },
+    {
+      "command": ".venv/bin/pytest -q tests/oss_publication/test_distribution_artifact.py::test_isolated_wheel_serves_the_bundled_client",
+      "result": "passed"
+    }
+  ],
+  "note": "The candidate commit contains the release code. This evidence-only follow-up records the immutable candidate and artifact hashes."
+}

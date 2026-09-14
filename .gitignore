@@ -20,6 +20,8 @@ extracted/
 .trustchain/
 # build metadata
 *.egg-info/
+/build/
+/dist/
 # machine-local: absolute interpreter and workspace paths of one laptop.
 # The rest of .cursor (hooks, rules) is consumer scaffolding and stays tracked.
 .cursor/mcp.json
