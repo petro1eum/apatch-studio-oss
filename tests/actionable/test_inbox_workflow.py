@@ -114,6 +114,29 @@ class GatewayDomain:
         return json.loads(path.read_text(encoding="utf-8"))
 
 
+class GatewayKeyProvider:
+    def __init__(self, public_key=b"g" * 32):
+        self.public_key = public_key
+
+    def get_public_key(self):
+        return self.public_key
+
+
+class GatewayIdentity:
+    def __init__(self, provider= None):
+        self.key_provider = provider or GATEWAY_PROVIDER
+
+
+GATEWAY_PROVIDER = GatewayKeyProvider()
+GATEWAY_KEY_ID = "sha256:" + hashlib.sha256(
+    GATEWAY_PROVIDER.get_public_key()
+).hexdigest()
+
+
+def gateway_identity_loader(_target_dir):
+    return GatewayIdentity()
+
+
 class GatewayDelivery:
     @staticmethod
     def config_path(target_dir):
@@ -121,7 +144,10 @@ class GatewayDelivery:
 
     @staticmethod
     def load_config(target_dir):
-        return {"binding_authority_keys": {"platform:key": "public"}}
+        return {
+            "binding_authority_keys": {"platform:key": "public"},
+            "service_request_key_id": GATEWAY_KEY_ID,
+        }
 
 
 class GatewayWorkItemAcceptance:
@@ -137,6 +163,7 @@ class GatewayApi:
         self.legacy = legacy
         self.canonical = canonical
         self.events = []
+        self.sync_providers = []
         self.change = None
         self.change_hash = None
         self.proposal = None
@@ -176,7 +203,8 @@ class GatewayApi:
             },
         }
 
-    def sync_governed_work(self, target_dir):
+    def sync_governed_work(self, target_dir, **request):
+        self.sync_providers.append(request.get("request_key_provider"))
         self.events.append(("sync", len(self.events)))
         if sum(event[0] == "sync" for event in self.events) == 2:
             if self.canonical:
@@ -233,6 +261,7 @@ def test_apatch_gateway_requires_acceptance_then_source_binding_ack(tmp_path):
         api=api,
         domain=GatewayDomain,
         delivery=GatewayDelivery,
+        identity_loader=gateway_identity_loader,
     )
 
     receipt = gateway.accept_and_bind(
@@ -245,6 +274,8 @@ def test_apatch_gateway_requires_acceptance_then_source_binding_ack(tmp_path):
         proposal["work_item_id"] + ":" + str(proposal["authority_version"])
     )
     assert request["queue_source_binding"] is True
+    assert request["request_key_provider"] is GATEWAY_PROVIDER
+    assert api.sync_providers == [GATEWAY_PROVIDER, GATEWAY_PROVIDER]
     assert request["purpose"] == (
         "Execute the owner-selected SPEC for Cowork work item "
         f"{proposal['work_item_id']} under execution intent {proposal['intent_id']}"
@@ -258,6 +289,7 @@ def test_apatch_gateway_requires_acceptance_then_source_binding_ack(tmp_path):
         api=legacy,
         domain=GatewayDomain,
         delivery=GatewayDelivery,
+        identity_loader=gateway_identity_loader,
     )
     with pytest.raises(GovernedWorkGatewayError, match="cannot complete"):
         old_gateway.accept_and_bind(
@@ -280,6 +312,7 @@ def test_canonical_work_item_binding_ack_precedes_local_agent_start(tmp_path):
         domain=GatewayDomain,
         delivery=GatewayDelivery,
         work_item_acceptance=GatewayWorkItemAcceptance,
+        identity_loader=gateway_identity_loader,
     )
     manager = ExecutionIntentManager(
         workspace,
@@ -307,6 +340,33 @@ def test_canonical_work_item_binding_ack_precedes_local_agent_start(tmp_path):
     assert confirmed["status"] == "consumed"
     assert confirmed["cowork"]["status"] == "source_bound"
     assert confirmed["cowork"]["source_binding_id"] == "tcawieb_" + "f" * 32
+
+
+def test_apatch_gateway_rejects_selected_workspace_identity_mismatch(tmp_path):
+    from apatch_studio.governed_work_gateway import (
+        APatchGovernedWorkGateway,
+        GovernedWorkGatewayError,
+    )
+
+    workspace = tmp_path / "mismatched-gateway-workspace"
+    (workspace / ".apatch").mkdir(parents=True)
+    GatewayDelivery.config_path(workspace).write_text("{}", encoding="utf-8")
+    api = GatewayApi(workspace)
+    wrong_provider = GatewayKeyProvider(b"x" * 32)
+    gateway = APatchGovernedWorkGateway(
+        workspace,
+        api=api,
+        domain=GatewayDomain,
+        delivery=GatewayDelivery,
+        identity_loader=lambda _target_dir: GatewayIdentity(wrong_provider),
+    )
+
+    with pytest.raises(GovernedWorkGatewayError, match="does not match"):
+        gateway.accept_and_bind(
+            json.loads(fixture()),
+            spec_id="SPEC-ACT-MANDATE-CHAIN-1",
+        )
+    assert api.events == []
 
 
 class FakeCoworkGateway:

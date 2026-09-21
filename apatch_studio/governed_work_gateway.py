@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -38,6 +39,7 @@ class APatchGovernedWorkGateway:
         domain: Any | None = None,
         delivery: Any | None = None,
         work_item_acceptance: Any | None = None,
+        identity_loader: Any | None = None,
     ):
         self.workspace = Path(workspace).expanduser().resolve()
         if (
@@ -57,10 +59,42 @@ class APatchGovernedWorkGateway:
             work_item_acceptance = (
                 work_item_acceptance or runtime_work_item_acceptance
             )
+        if identity_loader is None:
+            from apatch.trust_identity import load_local_identity
+
+            identity_loader = load_local_identity
         self._api = api
         self._domain = domain
         self._delivery = delivery
         self._work_item_acceptance = work_item_acceptance
+        self._identity_loader = identity_loader
+
+    def _workspace_key_provider(self) -> Any:
+        identity = self._identity_loader(str(self.workspace))
+        provider = getattr(identity, "key_provider", None) if identity else None
+        if provider is None:
+            raise GovernedWorkGatewayError(
+                "selected workspace has no enrolled APatch signing identity"
+            )
+        try:
+            public_key = provider.get_public_key()
+        except Exception as exc:
+            raise GovernedWorkGatewayError(
+                "selected workspace APatch signing identity is unavailable"
+            ) from exc
+        if not isinstance(public_key, bytes) or len(public_key) != 32:
+            raise GovernedWorkGatewayError(
+                "selected workspace APatch signing identity is invalid"
+            )
+        config = self._delivery.load_config(str(self.workspace))
+        expected_key_id = str(config.get("service_request_key_id") or "")
+        actual_key_id = "sha256:" + hashlib.sha256(public_key).hexdigest()
+        if expected_key_id != actual_key_id:
+            raise GovernedWorkGatewayError(
+                "selected workspace APatch signing identity does not match "
+                "the configured Cowork service identity"
+            )
+        return provider
 
     @property
     def connected(self) -> bool:
@@ -85,6 +119,7 @@ class APatchGovernedWorkGateway:
         ):
             raise GovernedWorkGatewayError("execution proposal identity is incomplete")
 
+        request_key_provider = self._workspace_key_provider()
         accepted = self._api.accept_execution_proposal(
             str(self.workspace),
             proposal=dict(proposal),
@@ -95,6 +130,7 @@ class APatchGovernedWorkGateway:
                 f"{work_item_id} under execution intent {intent_id}"
             ),
             queue_source_binding=True,
+            request_key_provider=request_key_provider,
         )
         if accepted.get("ok") is not True or accepted.get("work_started") is not False:
             raise GovernedWorkGatewayError("Cowork did not accept the exact assignment")
@@ -130,7 +166,10 @@ class APatchGovernedWorkGateway:
         last_sync: Mapping[str, Any] | None = None
         if bound is None:
             for _round in range(ROUND_TRIP_SYNC_ROUNDS):
-                last_sync = self._api.sync_governed_work(str(self.workspace))
+                last_sync = self._api.sync_governed_work(
+                    str(self.workspace),
+                    request_key_provider=request_key_provider,
+                )
                 bound = self._find_exact_binding(change, change_hash, proposal)
                 if bound is not None:
                     break
