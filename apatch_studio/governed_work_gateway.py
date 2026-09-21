@@ -6,10 +6,39 @@ import hashlib
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Protocol
 
 
 ROUND_TRIP_SYNC_ROUNDS = 2
+
+
+def _load_exact_workspace_identity(workspace_root: str) -> Any | None:
+    """Load only the selected workspace signer, ignoring Studio process identity."""
+
+    from apatch import trust_identity
+    from apatch.workspace_identity import load_workspace_identity
+
+    record = load_workspace_identity(workspace_root)
+    if record is None:
+        return None
+    try:
+        if record.get("key_backend") == "command":
+            provider = trust_identity.CommandKeyProvider(
+                record["sign_cmd"],
+                record["public_key"],
+                key_id=record["agent_id"],
+            )
+        elif record.get("key_backend") == "pem":
+            provider = trust_identity._PemKeyProvider(
+                record["key"],
+                key_id=record["agent_id"],
+            )
+        else:
+            return None
+    except Exception:
+        return None
+    return SimpleNamespace(key_provider=provider)
 
 
 class GovernedWorkGatewayError(RuntimeError):
@@ -60,9 +89,7 @@ class APatchGovernedWorkGateway:
                 work_item_acceptance or runtime_work_item_acceptance
             )
         if identity_loader is None:
-            from apatch.trust_identity import load_local_identity
-
-            identity_loader = load_local_identity
+            identity_loader = _load_exact_workspace_identity
         self._api = api
         self._domain = domain
         self._delivery = delivery

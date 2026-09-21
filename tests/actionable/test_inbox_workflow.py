@@ -342,6 +342,41 @@ def test_canonical_work_item_binding_ack_precedes_local_agent_start(tmp_path):
     assert confirmed["cowork"]["source_binding_id"] == "tcawieb_" + "f" * 32
 
 
+def test_apatch_gateway_uses_workspace_identity_despite_studio_machine_identity(
+    tmp_path, monkeypatch
+):
+    from apatch_studio.governed_work_gateway import APatchGovernedWorkGateway
+
+    workspace = tmp_path / "workspace-identity-precedence"
+    (workspace / ".apatch").mkdir(parents=True)
+    GatewayDelivery.config_path(workspace).write_text("{}", encoding="utf-8")
+    workspace_public_key = GATEWAY_PROVIDER.get_public_key()
+    (workspace / ".apatch" / "agent-identity.json").write_text(
+        json.dumps(
+            {
+                "agent_id": "selected-workspace",
+                "key_backend": "command",
+                "sign_cmd": "trustchain-secrets-sign selected-workspace",
+                "public_key": base64.b64encode(workspace_public_key).decode("ascii"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APATCH_AGENT_ID", "studio-machine")
+    monkeypatch.setenv("APATCH_AGENT_KEY", "/machine/key.pem")
+    gateway = APatchGovernedWorkGateway(
+        workspace,
+        api=GatewayApi(workspace),
+        domain=GatewayDomain,
+        delivery=GatewayDelivery,
+        work_item_acceptance=GatewayWorkItemAcceptance,
+    )
+
+    provider = gateway._workspace_key_provider()
+    assert provider.get_public_key() == workspace_public_key
+    assert provider.get_key_id() == "selected-workspace"
+
+
 def test_apatch_gateway_rejects_selected_workspace_identity_mismatch(tmp_path):
     from apatch_studio.governed_work_gateway import (
         APatchGovernedWorkGateway,
