@@ -66,6 +66,11 @@ from apatch_studio.operations import (
     SddExecutionContext,
     SddFreezeRequest,
 )
+from apatch_studio.result_delivery import (
+    ResultDeliveryError,
+    ResultPreviewRequest,
+    ResultSubmitRequest,
+)
 from apatch_studio.policy_workflow import PolicyActionRequest
 from apatch_studio.project_documents import (
     InvalidProjectDocumentId,
@@ -333,6 +338,17 @@ def create_app(
         return JSONResponse(
             {"ok": False, "error": str(error), "error_code": error.code},
             status_code=error.status_code,
+        )
+
+    @app.exception_handler(ResultDeliveryError)
+    async def result_delivery_error(_request: Request, error: ResultDeliveryError):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": str(error),
+                "error_code": "cowork_result_delivery_failed",
+            },
+            status_code=409,
         )
 
     @app.get("/api/v1/health")
@@ -657,6 +673,23 @@ def create_app(
         @app.post("/api/v1/execution-intents/{intent_id}/cancel")
         def cancel_execution_intent(intent_id: str) -> dict[str, Any]:
             return runtime_intents.cancel(intent_id)
+
+        @app.post("/api/v1/execution-intents/{intent_id}/result/preview")
+        def preview_execution_intent_result(
+            intent_id: str,
+            request: ResultPreviewRequest,
+        ) -> dict[str, Any]:
+            return runtime_intents.preview_result(intent_id, request)
+
+        @app.post(
+            "/api/v1/execution-intents/{intent_id}/result/submit",
+            status_code=202,
+        )
+        def submit_execution_intent_result(
+            intent_id: str,
+            request: ResultSubmitRequest,
+        ) -> dict[str, Any]:
+            return runtime_intents.submit_result(intent_id, request)
 
     assets = frontend / "assets"
     if assets.is_dir():

@@ -11,6 +11,8 @@ import type {
   EvidenceAction,
   EvidenceActionResult,
   ExecutionIntentPreview,
+  CoworkResultDeliveryPlan,
+  CoworkResultDeliveryReceipt,
   ImportedChangeDetail,
   AcceptanceAct,
   AcceptedTimeDecision,
@@ -378,6 +380,35 @@ export const confirmExecutionIntent = (
         runner_id: runnerId,
         mode,
         ...(specId ? { spec_id: specId } : {}),
+      }),
+    },
+  );
+
+export const previewExecutionIntentResult = (
+  intentId: string,
+  relativePath: string,
+) =>
+  request<CoworkResultDeliveryPlan>(
+    "/api/v1/execution-intents/" + encodeURIComponent(intentId) + "/result/preview",
+    {
+      method: "POST",
+      body: JSON.stringify({ relative_path: relativePath }),
+    },
+  );
+
+export const submitExecutionIntentResult = (
+  intentId: string,
+  relativePath: string,
+  plan: CoworkResultDeliveryPlan,
+) =>
+  request<CoworkResultDeliveryReceipt>(
+    "/api/v1/execution-intents/" + encodeURIComponent(intentId) + "/result/submit",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        relative_path: relativePath,
+        plan,
+        confirmation: "submit:" + plan.plan_hash,
       }),
     },
   );

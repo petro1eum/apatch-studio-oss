@@ -2,11 +2,13 @@ import {
   AlertTriangle,
   Check,
   Database,
+  FileCheck2,
   Inbox,
   KeyRound,
   LoaderCircle,
   RefreshCw,
   RotateCcw,
+  Send,
   Server,
   ShieldCheck,
   SlidersHorizontal,
@@ -20,6 +22,8 @@ import {
   confirmExecutionIntent,
   importExecutionIntent,
   loadExecutionIntents,
+  previewExecutionIntentResult,
+  submitExecutionIntentResult,
   runPolicyAction,
   runSystemAction,
   runWorkspaceAction,
@@ -28,6 +32,8 @@ import { ActionResultView } from "./OutsideInViews";
 import type { ConfirmRequest } from "./OutsideInViews";
 import type {
   ActionReceipt,
+  CoworkResultDeliveryPlan,
+  CoworkResultDeliveryReceipt,
   ExecutionIntentPreview,
   RunnerInfo,
   WorkspaceAlias,
@@ -206,6 +212,91 @@ function RulesAdmin({ data, requestConfirm }: { data: WorkspaceOverview; request
   </section>;
 }
 
+function ResultDeliveryPanel({
+  item,
+  onRefresh,
+  onChanged,
+}: {
+  item: ExecutionIntentPreview;
+  onRefresh: () => Promise<void>;
+  onChanged: () => Promise<void>;
+}) {
+  const [relativePath, setRelativePath] = useState("");
+  const [plan, setPlan] = useState<CoworkResultDeliveryPlan | null>(null);
+  const [receipt, setReceipt] = useState<CoworkResultDeliveryReceipt | null>(null);
+  const [acting, setActing] = useState<"preview" | "submit" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const recorded = receipt ?? item.result_delivery;
+
+  async function prepare() {
+    try {
+      setActing("preview");
+      setError(null);
+      setReceipt(null);
+      setPlan(await previewExecutionIntentResult(item.intent_id, relativePath.trim()));
+    } catch (reason) {
+      setPlan(null);
+      setError(reason instanceof Error ? reason.message : "Result preview failed.");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function submit() {
+    if (!plan) return;
+    try {
+      setActing("submit");
+      setError(null);
+      setReceipt(
+        await submitExecutionIntentResult(item.intent_id, relativePath.trim(), plan),
+      );
+      await onRefresh();
+      await onChanged();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Result submission failed.");
+    } finally {
+      setActing(null);
+    }
+  }
+
+  if (recorded.state === "submitted") {
+    return <section className="oi-result-delivery is-submitted" aria-label="Cowork result submission">
+      <div className="oi-result-title"><FileCheck2 size={17} /><div><strong>Submitted to Cowork</strong><span>The project now has a reviewable result backed by APatch evidence.</span></div></div>
+      <dl className="oi-result-facts">
+        <div><dt>Result hash</dt><dd><code>{recorded.result.outcome_ref}</code></dd></div>
+        <div><dt>Evidence bundle</dt><dd><code>{recorded.evidence.bundle_id}</code></dd></div>
+        <div><dt>Release receipt</dt><dd><code>{recorded.release.release_id}</code></dd></div>
+      </dl>
+    </section>;
+  }
+
+  if (!item.result_delivery.can_prepare) return null;
+
+  return <section className="oi-result-delivery" aria-label="Submit result to Cowork">
+    <div className="oi-result-title"><Send size={17} /><div><strong>Send finished work to Cowork</strong><span>Choose one result file from this workspace. Studio prepares the proof locally before anything is shared.</span></div></div>
+    <div className="oi-result-compose">
+      <label className="oi-field"><span>Result file</span><input aria-label="Result file" placeholder="reports/result.md" value={relativePath} onChange={(event) => { setRelativePath(event.target.value); setPlan(null); setReceipt(null); }} /></label>
+      <button className="oi-button oi-button-secondary" type="button" disabled={acting !== null || relativePath.trim().length === 0} onClick={() => void prepare()}>{acting === "preview" ? <LoaderCircle className="spin" size={15} /> : <FileCheck2 size={15} />}Prepare submission</button>
+    </div>
+    {plan ? <div className="oi-result-review">
+      <div>
+        <strong>Shared with Cowork</strong>
+        <dl className="oi-result-facts">
+          <div><dt>Relative file name</dt><dd><code>{plan.result.relative_path}</code></dd></div>
+          <div><dt>Result hash</dt><dd><code>{plan.result.outcome_ref}</code></dd></div>
+          <div><dt>File size</dt><dd>{plan.result.size_bytes.toLocaleString()} bytes</dd></div>
+          <div><dt>Evidence bundle</dt><dd><code>{plan.evidence.bundle_id}</code></dd></div>
+          <div><dt>Evidence hash</dt><dd><code>{plan.evidence.bundle_hash}</code></dd></div>
+          <div><dt>Claimed active time</dt><dd>{plan.evidence.claimed_active_seconds.toLocaleString()} seconds</dd></div>
+        </dl>
+      </div>
+      <div className="oi-result-local"><strong>Kept on this computer</strong><p>Source code, prompts, credentials, absolute paths and result contents stay local. Cowork receives hashes, bounded evidence and the release receipt.</p></div>
+      <div className="oi-result-consent"><span>Exact confirmation</span><code>submit:{plan.plan_hash}</code><button className="oi-button oi-button-primary" type="button" disabled={acting !== null} onClick={() => void submit()}>{acting === "submit" ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}Submit to Cowork</button></div>
+    </div> : null}
+    {error ? <div className="oi-alert is-error"><AlertTriangle size={15} />{error}</div> : null}
+  </section>;
+}
+
 export function InboxView({
   data,
   runners,
@@ -294,6 +385,7 @@ export function InboxView({
         <button className="oi-button oi-button-primary" type="button" disabled={!item.can_confirm || acting !== null || !runner || !workspaceId || ((requiresCowork(item) || executionMode === "specification") && !/^SPEC-[A-Z0-9][A-Z0-9-]{1,95}$/.test(existingSpecId.trim()))} onClick={() => void confirm(item)}><Check size={15} />{requiresCowork(item) ? "Accept in Cowork & run" : "Run locally"}</button>
         <button className="oi-icon-button" title="Decline request" type="button" disabled={!item.can_cancel || acting !== null} onClick={() => void cancel(item)}><RotateCcw size={15} /></button>
       </div>
+      <ResultDeliveryPanel item={item} onRefresh={refresh} onChanged={onChanged} />
     </article>)}</div>
     {data.execution_intents.configured ? <>{items.length === 0 ? <div className="oi-empty"><Inbox size={28} /><strong>No signed tasks are waiting</strong><span>New requests from a trusted issuer will appear here.</span></div> : null}<details className="oi-proof"><summary><KeyRound size={15} />Import signed task</summary><label className="oi-field"><span>Signed envelope</span><textarea rows={5} value={envelope} onChange={(event) => setEnvelope(event.target.value)} /></label><button className="oi-button oi-button-secondary" type="button" disabled={acting !== null || envelope.length < 10} onClick={() => void importTask()}><Inbox size={15} />Import</button></details></> : <div className="oi-empty"><KeyRound size={28} /><strong>Connect a trusted task issuer</strong><span>Signed task import is available after trust is configured. Start this local client with an execution-intent trust file; this works in OSS without a Cowork account. Solo work needs no account or trust file; private signing keys never belong here.</span></div>}
     {error ? <div className="oi-alert is-error"><AlertTriangle size={15} />{error}</div> : null}
