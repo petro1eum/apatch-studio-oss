@@ -104,6 +104,53 @@ export interface SddContractReview {
   }>;
 }
 
+export interface CoworkResultDeliveryPlan {
+  schema: "apatch.studio.cowork-result-delivery-plan.v1";
+  intent_id: string;
+  platform_origin: string;
+  client_subject: string;
+  tenant_id: string;
+  project_group_id: string;
+  work_item_id: string;
+  work_item_hash: string;
+  authority_version: number;
+  work_program_id: string;
+  work_program_hash: string;
+  source_binding_id: string;
+  result: {
+    relative_path: string;
+    outcome_ref: string;
+    size_bytes: number;
+    content_shared: false;
+  };
+  evidence: {
+    bundle_id: string;
+    bundle_hash: string;
+    claimed_active_seconds: number;
+    publication_plan_hash: string;
+  };
+  connection_generation: string;
+  plan_hash: string;
+}
+
+export interface CoworkResultDeliveryReceipt {
+  schema: "apatch.studio.cowork-result-delivery.v1";
+  intent_id: string;
+  state: "not_submitted" | "submitted";
+  plan_hash: string | null;
+  result: { outcome_ref: string | null };
+  evidence: {
+    bundle_id: string | null;
+    bundle_hash: string | null;
+  };
+  release: {
+    release_id: string | null;
+    release_hash: string | null;
+    state: "submitted" | null;
+  };
+  updated_at: string | null;
+}
+
 export interface ExecutionIntentPreview {
   schema: "apatch.studio.execution-intent-preview.v1";
   intent_id: string;
@@ -136,6 +183,7 @@ export interface ExecutionIntentPreview {
     change_id: string | null;
     source_binding_id: string | null;
   };
+  result_delivery: CoworkResultDeliveryReceipt & { can_prepare: boolean };
   can_confirm: boolean;
   can_cancel: boolean;
 }

@@ -44,6 +44,9 @@ _COWORK_STATUSES = {
 _INTENT_ID_PATTERN = re.compile(r"^tcapsei_[0-9a-f]{32}$")
 _CHANGE_ID_PATTERN = re.compile(r"^apchg_[0-9a-f]{32}$")
 _SOURCE_BINDING_ID_PATTERN = re.compile(r"^(?:tcpsb|tcawieb)_[0-9a-f]{32}$")
+_HASH_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+_BUNDLE_ID_PATTERN = re.compile(r"^apweb_[0-9a-f]{32}$")
+_RELEASE_ID_PATTERN = re.compile(r"^tcwr_[0-9a-f]{32}$")
 _LEGACY_RECORD_FIELDS = {
     "schema",
     "intent_id",
@@ -67,11 +70,22 @@ _LEGACY_RECORD_FIELDS = {
     "run_id",
     "consumed_at",
 }
-_RECORD_FIELDS = _LEGACY_RECORD_FIELDS | {
+_PRE_RESULT_RECORD_FIELDS = _LEGACY_RECORD_FIELDS | {
     "cowork_status",
     "cowork_change_id",
     "cowork_source_binding_id",
 }
+_RESULT_RECORD_FIELDS = {
+    "cowork_result_state",
+    "cowork_result_plan_hash",
+    "cowork_result_outcome_ref",
+    "cowork_result_evidence_bundle_id",
+    "cowork_result_evidence_bundle_hash",
+    "cowork_result_release_id",
+    "cowork_result_release_hash",
+    "cowork_result_updated_at",
+}
+_RECORD_FIELDS = _PRE_RESULT_RECORD_FIELDS | _RESULT_RECORD_FIELDS
 T = TypeVar("T")
 
 
@@ -309,6 +323,19 @@ class IntentStore:
                     "cowork_source_binding_id": None,
                 }
             )
+        if set(candidate) == _PRE_RESULT_RECORD_FIELDS:
+            candidate.update(
+                {
+                    "cowork_result_state": "not_submitted",
+                    "cowork_result_plan_hash": None,
+                    "cowork_result_outcome_ref": None,
+                    "cowork_result_evidence_bundle_id": None,
+                    "cowork_result_evidence_bundle_hash": None,
+                    "cowork_result_release_id": None,
+                    "cowork_result_release_hash": None,
+                    "cowork_result_updated_at": None,
+                }
+            )
         if set(candidate) != _RECORD_FIELDS:
             raise IntentJournalError("execution-intent record shape is invalid")
         if candidate.get("schema") != INTENT_RECORD_SCHEMA:
@@ -333,6 +360,39 @@ class IntentStore:
                 raise IntentJournalError("source-bound intent is missing exact identifiers")
         elif change_id is not None or source_binding_id is not None:
             raise IntentJournalError("unbound intent cannot carry Cowork identifiers")
+        result_state = candidate.get("cowork_result_state")
+        result_values = {
+            field: candidate.get(field)
+            for field in _RESULT_RECORD_FIELDS
+            if field != "cowork_result_state"
+        }
+        if result_state == "not_submitted":
+            if any(value is not None for value in result_values.values()):
+                raise IntentJournalError("unsubmitted result cannot carry receipt data")
+        elif result_state == "submitted":
+            if candidate.get("status") != "consumed" or candidate.get("cowork_status") != "source_bound":
+                raise IntentJournalError("submitted result requires a source-bound assignment")
+            if (
+                not _HASH_PATTERN.fullmatch(str(candidate.get("cowork_result_plan_hash") or ""))
+                or not _HASH_PATTERN.fullmatch(str(candidate.get("cowork_result_outcome_ref") or ""))
+                or not _BUNDLE_ID_PATTERN.fullmatch(
+                    str(candidate.get("cowork_result_evidence_bundle_id") or "")
+                )
+                or not _HASH_PATTERN.fullmatch(
+                    str(candidate.get("cowork_result_evidence_bundle_hash") or "")
+                )
+                or not _RELEASE_ID_PATTERN.fullmatch(
+                    str(candidate.get("cowork_result_release_id") or "")
+                )
+                or not _HASH_PATTERN.fullmatch(
+                    str(candidate.get("cowork_result_release_hash") or "")
+                )
+                or not isinstance(candidate.get("cowork_result_updated_at"), str)
+                or not candidate["cowork_result_updated_at"]
+            ):
+                raise IntentJournalError("submitted result receipt is incomplete")
+        else:
+            raise IntentJournalError("invalid Cowork result state")
         try:
             assert_projection_safe(candidate)
             return json.loads(json.dumps(candidate, ensure_ascii=True))

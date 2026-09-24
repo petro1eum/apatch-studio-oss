@@ -26,6 +26,12 @@ from apatch_studio.governed_work_gateway import (
 )
 from apatch_studio.intent_store import INTENT_RECORD_SCHEMA, IntentStore
 from apatch_studio.operations import AgentRunRequest, ExecutionContext, RunnerId
+from apatch_studio.result_delivery import (
+    CoworkResultDelivery,
+    ResultDeliveryError,
+    ResultPreviewRequest,
+    ResultSubmitRequest,
+)
 
 EXECUTION_INTENT_SCHEMA = "trustchain.apatch-studio.execution-intent.v1"
 TRUST_SCHEMA = "apatch.studio.execution-intent-trust.v1"
@@ -323,6 +329,7 @@ class ExecutionIntentManager:
         state_root: str | os.PathLike[str] | None = None,
         clock: Callable[[], datetime] | None = None,
         governed_work_gateway: GovernedWorkGateway | None = None,
+        result_delivery: Any | None = None,
     ):
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace_id = hashlib.sha256(str(self.workspace).encode("utf-8")).hexdigest()[:32]
@@ -333,6 +340,7 @@ class ExecutionIntentManager:
         self.governed_work_gateway = (
             governed_work_gateway or APatchGovernedWorkGateway(self.workspace)
         )
+        self.result_delivery = result_delivery or CoworkResultDelivery(self.workspace)
         self._reconcile_inflight()
 
     @property
@@ -426,6 +434,14 @@ class ExecutionIntentManager:
             ),
             "cowork_change_id": None,
             "cowork_source_binding_id": None,
+            "cowork_result_state": "not_submitted",
+            "cowork_result_plan_hash": None,
+            "cowork_result_outcome_ref": None,
+            "cowork_result_evidence_bundle_id": None,
+            "cowork_result_evidence_bundle_hash": None,
+            "cowork_result_release_id": None,
+            "cowork_result_release_hash": None,
+            "cowork_result_updated_at": None,
         }
 
         def admit(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -467,6 +483,87 @@ class ExecutionIntentManager:
     def get(self, intent_id: str) -> dict[str, Any]:
         self._expire_pending()
         return self._project(self._find(self.store.load(), intent_id))
+
+    def preview_result(
+        self,
+        intent_id: str,
+        request: ResultPreviewRequest,
+    ) -> dict[str, Any]:
+        record = self._find(self.store.load(), intent_id)
+        if record["cowork_result_state"] == "submitted":
+            raise ResultDeliveryError("this assignment result is already submitted")
+        return self.result_delivery.preview(
+            record,
+            relative_path=request.relative_path,
+        )
+
+    def submit_result(
+        self,
+        intent_id: str,
+        request: ResultSubmitRequest,
+    ) -> dict[str, Any]:
+        snapshot = self._find(self.store.load(), intent_id)
+        plan_hash = str(request.plan.get("plan_hash") or "")
+        if snapshot["cowork_result_state"] == "submitted":
+            if (
+                plan_hash != snapshot["cowork_result_plan_hash"]
+                or request.confirmation != f"submit:{plan_hash}"
+            ):
+                raise ResultDeliveryError("result retry conflicts with the submitted receipt")
+            return self._result_projection(snapshot)
+
+        receipt = self.result_delivery.submit(
+            snapshot,
+            relative_path=request.relative_path,
+            plan=request.plan,
+            confirmation=request.confirmation,
+        )
+        result = request.plan.get("result")
+        evidence = request.plan.get("evidence")
+        if (
+            not isinstance(result, dict)
+            or not isinstance(evidence, dict)
+            or not re.fullmatch(_HASH_PATTERN, plan_hash)
+            or not re.fullmatch(_HASH_PATTERN, str(result.get("outcome_ref") or ""))
+            or not re.fullmatch(r"^apweb_[0-9a-f]{32}$", str(evidence.get("bundle_id") or ""))
+            or not re.fullmatch(_HASH_PATTERN, str(evidence.get("bundle_hash") or ""))
+            or not isinstance(receipt, dict)
+            or receipt.get("schema") != "trustchain.apatch-studio.result-delivery.v1"
+            or receipt.get("project_group_id") != snapshot["project_group_id"]
+            or receipt.get("work_item_id") != snapshot["work_item_id"]
+            or not re.fullmatch(r"^tcwr_[0-9a-f]{32}$", str(receipt.get("release_id") or ""))
+            or not re.fullmatch(_HASH_PATTERN, str(receipt.get("release_hash") or ""))
+            or receipt.get("state") != "submitted"
+        ):
+            raise ResultDeliveryError("Cowork returned an invalid submitted receipt")
+        now = self._utc_now().isoformat()
+
+        def persist(records: list[dict[str, Any]]) -> dict[str, Any]:
+            current = self._find(records, intent_id)
+            if current["cowork_result_state"] == "submitted":
+                if current["cowork_result_plan_hash"] != plan_hash:
+                    raise ResultDeliveryError(
+                        "result retry conflicts with the submitted receipt"
+                    )
+                return self._result_projection(current)
+            if current["status"] != "consumed" or current["cowork_status"] != "source_bound":
+                raise ResultDeliveryError("assignment is not ready for result submission")
+            current.update(
+                {
+                    "cowork_result_state": "submitted",
+                    "cowork_result_plan_hash": plan_hash,
+                    "cowork_result_outcome_ref": result["outcome_ref"],
+                    "cowork_result_evidence_bundle_id": evidence["bundle_id"],
+                    "cowork_result_evidence_bundle_hash": evidence["bundle_hash"],
+                    "cowork_result_release_id": receipt["release_id"],
+                    "cowork_result_release_hash": receipt["release_hash"],
+                    "cowork_result_updated_at": now,
+                    "updated_at": now,
+                }
+            )
+            return self._result_projection(current)
+
+        return self.store.update(persist)
 
     def cancel(self, intent_id: str) -> dict[str, Any]:
         now = self._utc_now().isoformat()
@@ -704,6 +801,29 @@ class ExecutionIntentManager:
             status_code=404,
         )
 
+    @staticmethod
+    def _result_projection(record: Mapping[str, Any]) -> dict[str, Any]:
+        submitted = record["cowork_result_state"] == "submitted"
+        return {
+            "schema": "apatch.studio.cowork-result-delivery.v1",
+            "intent_id": record["intent_id"],
+            "state": record["cowork_result_state"],
+            "plan_hash": record["cowork_result_plan_hash"],
+            "result": {
+                "outcome_ref": record["cowork_result_outcome_ref"],
+            },
+            "evidence": {
+                "bundle_id": record["cowork_result_evidence_bundle_id"],
+                "bundle_hash": record["cowork_result_evidence_bundle_hash"],
+            },
+            "release": {
+                "release_id": record["cowork_result_release_id"],
+                "release_hash": record["cowork_result_release_hash"],
+                "state": "submitted" if submitted else None,
+            },
+            "updated_at": record["cowork_result_updated_at"],
+        }
+
     def _project(self, record: dict[str, Any]) -> dict[str, Any]:
         connected = self.cowork_connected
         cowork_status = record["cowork_status"]
@@ -739,6 +859,14 @@ class ExecutionIntentManager:
                 "status": cowork_status,
                 "change_id": record["cowork_change_id"],
                 "source_binding_id": record["cowork_source_binding_id"],
+            },
+            "result_delivery": {
+                **self._result_projection(record),
+                "can_prepare": (
+                    record["status"] == "consumed"
+                    and record["cowork_status"] == "source_bound"
+                    and record["cowork_result_state"] == "not_submitted"
+                ),
             },
             "can_confirm": record["status"] == "awaiting_local_confirmation",
             "can_cancel": record["status"] == "awaiting_local_confirmation",
