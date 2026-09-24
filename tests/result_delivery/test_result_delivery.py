@@ -22,6 +22,28 @@ class FakeDomain:
     def value_hash(cls, value):
         return "sha256:" + hashlib.sha256(cls.canonical_bytes(value)).hexdigest()
 
+    @staticmethod
+    def governed_work_root(target_dir):
+        return Path(target_dir) / ".apatch" / "governed_work"
+
+    @classmethod
+    def load_project_source_binding(cls, target_dir, binding_id):
+        path = cls.governed_work_root(target_dir) / "bindings" / f"{binding_id}.json"
+        return json.loads(path.read_text(encoding="utf-8"))
+
+
+class FakeBindingDelivery:
+    @staticmethod
+    def load_config(_target_dir):
+        return {"binding_authority_keys": {"platform:key": "public"}}
+
+
+class FakeWorkItemAcceptance:
+    @staticmethod
+    def validate_binding(document, *, trusted_keys):
+        assert trusted_keys == {"platform:key": "public"}
+        return document
+
 
 class FakeApi:
     def __init__(self):
@@ -62,6 +84,20 @@ class FakeApi:
         }
 
 
+class ExistingEvidenceApi(FakeApi):
+    def __init__(self, error="immutable id is already bound to another envelope: apts_test"):
+        super().__init__()
+        self.error = error
+
+    def build_governed_evidence(self, target_dir, **request):
+        self.calls.append(("build", target_dir, request))
+        return {
+            "ok": False,
+            "error_type": "GOVERNED_WORK_INVALID",
+            "error": self.error,
+        }
+
+
 def assignment() -> dict:
     return {
         "intent_id": "tcapsei_" + "1" * 32,
@@ -74,7 +110,8 @@ def assignment() -> dict:
         "work_program_hash": "sha256:" + "6" * 64,
         "status": "consumed",
         "cowork_status": "source_bound",
-        "cowork_source_binding_id": "tcawieb_" + "f" * 32,
+        "cowork_change_id": "apchg_" + "d" * 32,
+        "cowork_source_binding_id": "tcpsb_" + "f" * 32,
     }
 
 
@@ -207,6 +244,7 @@ class RoundTripDelivery:
             "platform_url": "https://trust-chain.ai",
             "client_id": "member:" + "9" * 32,
             "service_request_key_id": "sha256:" + "e" * 64,
+            "binding_authority_keys": {"platform:key": "public"},
         }
 
 
@@ -267,17 +305,60 @@ def test_submission_publishes_evidence_then_creates_and_submits_release(tmp_path
     (workspace / "result.txt").write_bytes(b"verified result\n")
     api = RoundTripApi()
     client = ResultClient()
+    record = {
+        **assignment(),
+        "cowork_source_binding_id": "tcawieb_" + "c" * 32,
+    }
+    canonical = {
+        "binding_id": record["cowork_source_binding_id"],
+        "tenant_id": record["tenant_id"],
+        "project_group_id": record["project_group_id"],
+        "work_item_id": record["work_item_id"],
+        "accepted_work_item_hash": record["work_item_hash"],
+        "accepted_authority_version": record["authority_version"],
+        "current_work_item_hash": "sha256:" + "9" * 64,
+        "current_authority_version": record["authority_version"] + 1,
+        "work_program_id": record["work_program_id"],
+        "work_program_hash": record["work_program_hash"],
+        "intent_id": record["intent_id"],
+        "change_id": record["cowork_change_id"],
+        "change_hash": "sha256:" + "a" * 64,
+        "actor_ref": "member:" + "9" * 32,
+    }
+    source_binding = {
+        "binding_id": "tcpsb_" + "b" * 32,
+        "tenant_id": canonical["tenant_id"],
+        "project_group_id": canonical["project_group_id"],
+        "work_program_id": canonical["work_program_id"],
+        "work_program_hash": canonical["work_program_hash"],
+        "change_id": canonical["change_id"],
+        "change_hash": canonical["change_hash"],
+        "actor_ref": canonical["actor_ref"],
+    }
+    root = FakeDomain.governed_work_root(workspace)
+    canonical_directory = root / "work_item_execution_bindings"
+    source_directory = root / "bindings"
+    canonical_directory.mkdir(parents=True)
+    source_directory.mkdir(parents=True)
+    (canonical_directory / f"{canonical['binding_id']}.json").write_text(
+        json.dumps(canonical), encoding="utf-8"
+    )
+    (source_directory / f"{source_binding['binding_id']}.json").write_text(
+        json.dumps(source_binding), encoding="utf-8"
+    )
     service = CoworkResultDelivery(
         workspace,
         api=api,
         domain=FakeDomain,
         delivery=RoundTripDelivery,
         transport=RoundTripTransport,
+        work_item_acceptance=FakeWorkItemAcceptance,
         identity_loader=lambda _root: Identity,
         http_client=client,
     )
-    record = assignment()
     plan = service.preview(record, relative_path="result.txt")
+    assert plan["work_item_hash"] == canonical["current_work_item_hash"]
+    assert plan["authority_version"] == canonical["current_authority_version"]
 
     receipt = service.submit(
         record,
@@ -312,11 +393,21 @@ def test_submission_publishes_evidence_then_creates_and_submits_release(tmp_path
     }
     assert create_body["outcome_ref"] == plan["result"]["outcome_ref"]
     assert create_body["evidence_bundle_id"] == plan["evidence"]["bundle_id"]
+    assert create_body["expected_work_item_hash"] == canonical["current_work_item_hash"]
+    assert (
+        create_body["expected_work_item_authority_version"]
+        == canonical["current_authority_version"]
+    )
     assert set(submit_body) == {
         "subject", "tenant_id", "expected_work_item_hash",
         "expected_work_item_authority_version", "expected_work_program",
         "idempotency_key",
     }
+    assert submit_body["expected_work_item_hash"] == canonical["current_work_item_hash"]
+    assert (
+        submit_body["expected_work_item_authority_version"]
+        == canonical["current_authority_version"]
+    )
     assert create_body["idempotency_key"] != submit_body["idempotency_key"]
     assert create_headers["X-TC-Service-Signature"] == "signed"
     assert submit_headers["X-TC-Service-Signature"] == "signed"
@@ -492,6 +583,127 @@ def test_preview_is_local_bounded_and_uses_exact_source_binding(tmp_path):
     encoded = json.dumps(plan)
     for forbidden in ("verified result", str(workspace.resolve()), "prompt", "credential"):
         assert forbidden not in encoded
+
+    existing_api = ExistingEvidenceApi()
+    existing_plan = delivery(workspace, existing_api).preview(
+        assignment(), relative_path="result.txt"
+    )
+    assert existing_plan == plan
+    assert [call[0] for call in existing_api.calls] == ["build", "preview"]
+
+    failed_api = ExistingEvidenceApi(error="missing current attestations")
+    with pytest.raises(ResultDeliveryError, match="could not be prepared"):
+        delivery(workspace, failed_api).preview(
+            assignment(), relative_path="result.txt"
+        )
+    assert [call[0] for call in failed_api.calls] == ["build"]
+
+    canonical_id = "tcawieb_" + "c" * 32
+    source_id = "tcpsb_" + "b" * 32
+    canonical_record = {
+        **assignment(),
+        "cowork_source_binding_id": canonical_id,
+    }
+    canonical = {
+        "binding_id": canonical_id,
+        "tenant_id": canonical_record["tenant_id"],
+        "project_group_id": canonical_record["project_group_id"],
+        "work_item_id": canonical_record["work_item_id"],
+        "accepted_work_item_hash": canonical_record["work_item_hash"],
+        "accepted_authority_version": canonical_record["authority_version"],
+        "current_work_item_hash": "sha256:" + "9" * 64,
+        "current_authority_version": canonical_record["authority_version"] + 1,
+        "work_program_id": canonical_record["work_program_id"],
+        "work_program_hash": canonical_record["work_program_hash"],
+        "intent_id": canonical_record["intent_id"],
+        "change_id": canonical_record["cowork_change_id"],
+        "change_hash": "sha256:" + "a" * 64,
+        "actor_ref": "member:" + "9" * 32,
+    }
+    source_binding = {
+        "binding_id": source_id,
+        "tenant_id": canonical["tenant_id"],
+        "project_group_id": canonical["project_group_id"],
+        "work_program_id": canonical["work_program_id"],
+        "work_program_hash": canonical["work_program_hash"],
+        "change_id": canonical["change_id"],
+        "change_hash": canonical["change_hash"],
+        "actor_ref": canonical["actor_ref"],
+        "spec_id": "SPEC-STUDIO-COWORK-RESULT-DELIVERY-1",
+        "spec_hash": "sha256:" + "e" * 64,
+    }
+    root = FakeDomain.governed_work_root(workspace)
+    canonical_directory = root / "work_item_execution_bindings"
+    source_directory = root / "bindings"
+    canonical_directory.mkdir(parents=True)
+    source_directory.mkdir(parents=True)
+    (canonical_directory / f"{canonical_id}.json").write_text(
+        json.dumps(canonical), encoding="utf-8"
+    )
+    (source_directory / f"{source_id}.json").write_text(
+        json.dumps(source_binding), encoding="utf-8"
+    )
+    bridged_api = FakeApi()
+    bridged = CoworkResultDelivery(
+        workspace,
+        api=bridged_api,
+        domain=FakeDomain,
+        delivery=FakeBindingDelivery,
+        transport=object(),
+        work_item_acceptance=FakeWorkItemAcceptance,
+        identity_loader=lambda _root: None,
+    )
+
+    bridged_plan = bridged.preview(canonical_record, relative_path="result.txt")
+
+    assert [call[2]["binding_id"] for call in bridged_api.calls] == [
+        source_id,
+        source_id,
+    ]
+    assert bridged_plan["source_binding_id"] == source_id
+    assert bridged_plan["work_item_hash"] == canonical["current_work_item_hash"]
+    assert bridged_plan["authority_version"] == canonical["current_authority_version"]
+
+    mismatched = dict(canonical)
+    mismatched["accepted_work_item_hash"] = "sha256:" + "0" * 64
+    (canonical_directory / f"{canonical_id}.json").write_text(
+        json.dumps(mismatched), encoding="utf-8"
+    )
+    rejected_api = FakeApi()
+    rejected = CoworkResultDelivery(
+        workspace,
+        api=rejected_api,
+        domain=FakeDomain,
+        delivery=FakeBindingDelivery,
+        transport=object(),
+        work_item_acceptance=FakeWorkItemAcceptance,
+        identity_loader=lambda _root: None,
+    )
+    with pytest.raises(ResultDeliveryError, match="does not match"):
+        rejected.preview(canonical_record, relative_path="result.txt")
+    assert rejected_api.calls == []
+
+    (canonical_directory / f"{canonical_id}.json").write_text(
+        json.dumps(canonical), encoding="utf-8"
+    )
+    duplicate_id = "tcpsb_" + "d" * 32
+    duplicate = {**source_binding, "binding_id": duplicate_id}
+    (source_directory / f"{duplicate_id}.json").write_text(
+        json.dumps(duplicate), encoding="utf-8"
+    )
+    ambiguous_api = FakeApi()
+    ambiguous = CoworkResultDelivery(
+        workspace,
+        api=ambiguous_api,
+        domain=FakeDomain,
+        delivery=FakeBindingDelivery,
+        transport=object(),
+        work_item_acceptance=FakeWorkItemAcceptance,
+        identity_loader=lambda _root: None,
+    )
+    with pytest.raises(ResultDeliveryError, match="one exact"):
+        ambiguous.preview(canonical_record, relative_path="result.txt")
+    assert ambiguous_api.calls == []
 
     before = len(api.calls)
     for invalid in (str(result.resolve()), "../result.txt", ".", "missing.txt"):
