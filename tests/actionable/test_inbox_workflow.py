@@ -206,43 +206,48 @@ class GatewayApi:
     def sync_governed_work(self, target_dir, **request):
         self.sync_providers.append(request.get("request_key_provider"))
         self.events.append(("sync", len(self.events)))
-        if sum(event[0] == "sync" for event in self.events) == 2:
-            if self.canonical:
-                binding = {
-                    "binding_id": "tcawieb_" + "f" * 32,
-                    "change_id": self.change["change_id"],
-                    "change_hash": self.change_hash,
-                    "tenant_id": self.change["tenant_id"],
-                    "project_group_id": self.change["project_group_id"],
-                    "work_program_id": self.change["work_program_id"],
-                    "work_program_hash": self.change["work_program_hash"],
-                    "work_item_id": self.proposal["work_item_id"],
-                    "accepted_work_item_hash": self.proposal["work_item_hash"],
-                    "accepted_authority_version": self.proposal["authority_version"],
-                    "intent_id": self.proposal["intent_id"],
-                }
-                directory = (
-                    GatewayDomain.governed_work_root(target_dir)
-                    / "work_item_execution_bindings"
-                )
-            else:
-                binding = {
-                    "binding_id": "tcpsb_" + "f" * 32,
-                    "change_id": self.change["change_id"],
-                    "change_hash": self.change_hash,
-                    "tenant_id": self.change["tenant_id"],
-                    "project_group_id": self.change["project_group_id"],
-                    "work_program_id": self.change["work_program_id"],
-                    "work_program_hash": self.change["work_program_hash"],
-                    "spec_id": self.change["spec_id"],
-                    "spec_hash": self.change["spec_hash"],
-                }
-                directory = GatewayDomain.governed_work_root(target_dir) / "bindings"
-            directory.mkdir(parents=True)
-            (directory / f"{binding['binding_id']}.json").write_text(
-                json.dumps(binding), encoding="utf-8"
+        sync_count = sum(event[0] == "sync" for event in self.events)
+        if self.canonical and sync_count == 1:
+            binding = {
+                "binding_id": "tcawieb_" + "f" * 32,
+                "change_id": self.change["change_id"],
+                "change_hash": self.change_hash,
+                "tenant_id": self.change["tenant_id"],
+                "project_group_id": self.change["project_group_id"],
+                "work_program_id": self.change["work_program_id"],
+                "work_program_hash": self.change["work_program_hash"],
+                "work_item_id": self.proposal["work_item_id"],
+                "accepted_work_item_hash": self.proposal["work_item_hash"],
+                "accepted_authority_version": self.proposal["authority_version"],
+                "intent_id": self.proposal["intent_id"],
+            }
+            directory = (
+                GatewayDomain.governed_work_root(target_dir)
+                / "work_item_execution_bindings"
             )
-        return {"ok": not self.canonical}
+        elif sync_count == 2:
+            binding = {
+                "binding_id": "tcpsb_" + "f" * 32,
+                "change_id": self.change["change_id"],
+                "change_hash": self.change_hash,
+                "tenant_id": self.change["tenant_id"],
+                "project_group_id": self.change["project_group_id"],
+                "work_program_id": self.change["work_program_id"],
+                "work_program_hash": self.change["work_program_hash"],
+                "spec_id": self.change["spec_id"],
+                "spec_hash": self.change["spec_hash"],
+            }
+            directory = GatewayDomain.governed_work_root(target_dir) / "bindings"
+        else:
+            return {"ok": True, "pending": 0}
+        directory.mkdir(parents=True)
+        (directory / f"{binding['binding_id']}.json").write_text(
+            json.dumps(binding), encoding="utf-8"
+        )
+        return {
+            "ok": True,
+            "pending": 1 if self.canonical and sync_count == 1 else 0,
+        }
 
 
 def test_apatch_gateway_requires_acceptance_then_source_binding_ack(tmp_path):
@@ -339,7 +344,16 @@ def test_canonical_work_item_binding_ack_precedes_local_agent_start(tmp_path):
     assert [event[0] for event in events] == ["run"]
     assert confirmed["status"] == "consumed"
     assert confirmed["cowork"]["status"] == "source_bound"
-    assert confirmed["cowork"]["source_binding_id"] == "tcawieb_" + "f" * 32
+    assert confirmed["cowork"]["source_binding_id"] == "tcpsb_" + "f" * 32
+    governed_root = GatewayDomain.governed_work_root(workspace)
+    assert (
+        governed_root
+        / "work_item_execution_bindings"
+        / ("tcawieb_" + "f" * 32 + ".json")
+    ).is_file()
+    assert (
+        governed_root / "bindings" / ("tcpsb_" + "f" * 32 + ".json")
+    ).is_file()
 
 
 def test_apatch_gateway_uses_workspace_identity_despite_studio_machine_identity(

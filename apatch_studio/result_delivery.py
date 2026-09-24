@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import stat
@@ -19,6 +20,7 @@ _INTENT_RE = re.compile(r"^tcapsei_[0-9a-f]{32}$")
 _GROUP_RE = re.compile(r"^tcpg_[0-9a-f]{32}$")
 _ITEM_RE = re.compile(r"^tcpwi_[0-9a-f]{32}$")
 _PROGRAM_RE = re.compile(r"^tcwp_[0-9a-f]{32}$")
+_CHANGE_RE = re.compile(r"^apchg_[0-9a-f]{32}$")
 _BINDING_RE = re.compile(r"^(?:tcpsb|tcawieb)_[0-9a-f]{32}$")
 _BUNDLE_RE = re.compile(r"^apweb_[0-9a-f]{32}$")
 
@@ -71,6 +73,7 @@ class CoworkResultDelivery:
         domain: Any | None = None,
         delivery: Any | None = None,
         transport: Any | None = None,
+        work_item_acceptance: Any | None = None,
         identity_loader: Any | None = None,
         http_client: Any | None = None,
     ):
@@ -95,6 +98,7 @@ class CoworkResultDelivery:
         self._domain = domain
         self._delivery = delivery
         self._transport = transport
+        self._work_item_acceptance = work_item_acceptance
         self._identity_loader = identity_loader
         self._http_client = http_client
 
@@ -168,11 +172,11 @@ class CoworkResultDelivery:
         common = {
             "subject": client_subject,
             "tenant_id": record["tenant_id"],
-            "expected_work_item_hash": record["work_item_hash"],
-            "expected_work_item_authority_version": record["authority_version"],
+            "expected_work_item_hash": plan["work_item_hash"],
+            "expected_work_item_authority_version": plan["authority_version"],
             "expected_work_program": {
-                "program_id": record["work_program_id"],
-                "program_hash": record["work_program_hash"],
+                "program_id": plan["work_program_id"],
+                "program_hash": plan["work_program_hash"],
             },
         }
         create = {
@@ -325,26 +329,46 @@ class CoworkResultDelivery:
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         exact = self._accepted_record(record)
         result = self._read_result(relative_path)
+        (
+            evidence_binding_id,
+            current_work_item_hash,
+            current_authority_version,
+        ) = self._evidence_binding(exact)
         built = self._api.build_governed_evidence(
             str(self.workspace),
-            binding_id=exact["cowork_source_binding_id"],
+            binding_id=evidence_binding_id,
             queue_for_admission=False,
         )
-        if not isinstance(built, dict) or built.get("error"):
+        if not isinstance(built, dict):
             raise ResultDeliveryError("local APatch evidence could not be prepared")
-        evidence_bundle = built.get("evidence_bundle")
-        if not isinstance(evidence_bundle, dict):
-            raise ResultDeliveryError("local APatch evidence bundle is unavailable")
+        build_error = str(built.get("error") or "")
+        reused_persisted_evidence = (
+            built.get("error_type") == "GOVERNED_WORK_INVALID"
+            and build_error.startswith(
+                "immutable id is already bound to another envelope:"
+            )
+        )
+        if build_error and not reused_persisted_evidence:
+            raise ResultDeliveryError("local APatch evidence could not be prepared")
+        evidence_bundle_id: str | None = None
+        if not reused_persisted_evidence:
+            evidence_bundle = built.get("evidence_bundle")
+            if not isinstance(evidence_bundle, dict):
+                raise ResultDeliveryError("local APatch evidence bundle is unavailable")
+            evidence_bundle_id = str(evidence_bundle.get("bundle_id") or "")
 
         previewed = self._api.preview_governed_evidence_publication(
             str(self.workspace),
-            binding_id=exact["cowork_source_binding_id"],
+            binding_id=evidence_binding_id,
         )
         if not isinstance(previewed, dict) or previewed.get("ok") is not True:
             raise ResultDeliveryError("local APatch disclosure preview is unavailable")
         publication = self._publication_plan(previewed.get("plan"))
         evidence_ref = publication["evidence_bundle_ref"]
-        if evidence_bundle.get("bundle_id") != evidence_ref["bundle_id"]:
+        if (
+            evidence_bundle_id is not None
+            and evidence_bundle_id != evidence_ref["bundle_id"]
+        ):
             raise ResultDeliveryError("APatch evidence changed while preparing the preview")
         if (
             publication["tenant_id"] != exact["tenant_id"]
@@ -360,11 +384,11 @@ class CoworkResultDelivery:
             "tenant_id": exact["tenant_id"],
             "project_group_id": exact["project_group_id"],
             "work_item_id": exact["work_item_id"],
-            "work_item_hash": exact["work_item_hash"],
-            "authority_version": exact["authority_version"],
+            "work_item_hash": current_work_item_hash,
+            "authority_version": current_authority_version,
             "work_program_id": exact["work_program_id"],
             "work_program_hash": exact["work_program_hash"],
-            "source_binding_id": exact["cowork_source_binding_id"],
+            "source_binding_id": evidence_binding_id,
             "result": {
                 "relative_path": result["relative_path"],
                 "outcome_ref": result["outcome_ref"],
@@ -382,6 +406,99 @@ class CoworkResultDelivery:
             "connection_generation": publication["connection_generation"],
         }
         return {**body, "plan_hash": self._domain.value_hash(body)}, publication
+
+    def _evidence_binding(
+        self,
+        exact: Mapping[str, Any],
+    ) -> tuple[str, str, int]:
+        selected = str(exact["cowork_source_binding_id"])
+        if selected.startswith("tcpsb_"):
+            return (
+                selected,
+                str(exact["work_item_hash"]),
+                int(exact["authority_version"]),
+            )
+
+        root = self._domain.governed_work_root(str(self.workspace))
+        canonical_path = root / "work_item_execution_bindings" / f"{selected}.json"
+        try:
+            raw = json.loads(canonical_path.read_text(encoding="utf-8"))
+            config = self._delivery.load_config(str(self.workspace))
+            validator = self._work_item_acceptance
+            if validator is None:
+                from apatch import work_item_acceptance as validator
+            canonical = validator.validate_binding(
+                raw,
+                trusted_keys=config["binding_authority_keys"],
+            )
+        except Exception as exc:
+            raise ResultDeliveryError(
+                "local Cowork work-item binding could not be verified"
+            ) from exc
+
+        expected = {
+            "binding_id": selected,
+            "tenant_id": exact["tenant_id"],
+            "project_group_id": exact["project_group_id"],
+            "work_item_id": exact["work_item_id"],
+            "accepted_work_item_hash": exact["work_item_hash"],
+            "accepted_authority_version": exact["authority_version"],
+            "work_program_id": exact["work_program_id"],
+            "work_program_hash": exact["work_program_hash"],
+            "intent_id": exact["intent_id"],
+            "change_id": exact["cowork_change_id"],
+        }
+        if any(canonical.get(field) != value for field, value in expected.items()):
+            raise ResultDeliveryError(
+                "local Cowork work-item binding does not match the assignment"
+            )
+        current_work_item_hash = canonical.get("current_work_item_hash")
+        current_authority_version = canonical.get("current_authority_version")
+        if (
+            not isinstance(current_work_item_hash, str)
+            or not _HASH_RE.fullmatch(current_work_item_hash)
+            or isinstance(current_authority_version, bool)
+            or not isinstance(current_authority_version, int)
+            or current_authority_version < 1
+        ):
+            raise ResultDeliveryError(
+                "local Cowork work-item binding has invalid current task pins"
+            )
+
+        source_bindings: list[dict[str, Any]] = []
+        source_directory = root / "bindings"
+        if source_directory.is_dir():
+            for path in sorted(source_directory.glob("tcpsb_*.json")):
+                try:
+                    candidate = self._domain.load_project_source_binding(
+                        str(self.workspace), path.stem
+                    )
+                except Exception as exc:
+                    raise ResultDeliveryError(
+                        "local APatch source binding could not be verified"
+                    ) from exc
+                if all(
+                    candidate.get(field) == canonical.get(field)
+                    for field in (
+                        "tenant_id",
+                        "project_group_id",
+                        "work_program_id",
+                        "work_program_hash",
+                        "change_id",
+                        "change_hash",
+                        "actor_ref",
+                    )
+                ):
+                    source_bindings.append(candidate)
+        if len(source_bindings) != 1:
+            raise ResultDeliveryError(
+                "assignment does not resolve to one exact APatch source binding"
+            )
+        return (
+            str(source_bindings[0]["binding_id"]),
+            current_work_item_hash,
+            current_authority_version,
+        )
 
     def _read_result(self, relative_path: str) -> dict[str, Any]:
         if (
@@ -450,6 +567,7 @@ class CoworkResultDelivery:
             ("work_item_hash", _HASH_RE),
             ("work_program_id", _PROGRAM_RE),
             ("work_program_hash", _HASH_RE),
+            ("cowork_change_id", _CHANGE_RE),
             ("cowork_source_binding_id", _BINDING_RE),
         )
         if (

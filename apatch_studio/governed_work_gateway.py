@@ -198,9 +198,13 @@ class APatchGovernedWorkGateway:
                     request_key_provider=request_key_provider,
                 )
                 bound = self._find_exact_binding(change, change_hash, proposal)
-                if bound is not None:
+                if bound is not None and str(
+                    bound.get("binding_id") or ""
+                ).startswith("tcpsb_"):
                     break
-        if bound is None:
+        if bound is None or not str(bound.get("binding_id") or "").startswith(
+            "tcpsb_"
+        ):
             if last_sync is not None and last_sync.get("ok") is not True:
                 raise GovernedWorkGatewayError(
                     "Cowork acknowledgement is unavailable or rejected"
