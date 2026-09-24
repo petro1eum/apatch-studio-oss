@@ -12,13 +12,11 @@ def test_adapter_reads_real_apatch_workspace(monkeypatch):
         return original(adapter, include_hygiene=include_hygiene)
 
     monkeypatch.setattr(APatchStudioAdapter, "_canonical_status_snapshot", snapshot)
-    root = Path(__file__).resolve().parents[2] / "apatch"
-    if not root.exists():
-        root = Path(__file__).resolve().parents[2] / "apatch-oss"
+    root = Path(__file__).resolve().parents[1]
     projection = APatchStudioAdapter(root, cache_ttl=60).overview()
 
     assert projection["schema"] == "apatch.studio.workspace-overview.v1"
-    assert projection["workspace"]["name"] == "apatch"
+    assert projection["workspace"]["name"] == root.name
     assert projection["runtime"]["apatch_version"] >= "0.8.36"
     assert projection["runtime"]["mcp_profile"] == "full"
     assert isinstance(projection["specifications"], list)

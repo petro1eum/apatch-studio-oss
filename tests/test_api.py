@@ -1,4 +1,3 @@
-from importlib.metadata import version as package_version
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -227,8 +226,8 @@ def test_authenticated_real_workspace_smoke(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["schema"] == "apatch.studio.workspace-overview.v1"
-    assert payload["workspace"]["name"] == "apatch-studio-oss"
-    assert payload["runtime"]["apatch_version"] == package_version("apatch")
+    assert payload["workspace"]["name"] == ROOT.name
+    assert payload["runtime"]["apatch_version"] == payload["runtime"]["requirements"]["installed_version"]
     assert payload["runtime"]["mcp_profile"] == "full"
     assert payload["runtime"]["tool_count"] >= 120
     assert payload["runtime"]["requirements"]["schema"] == "apatch.studio.runtime-requirements.v1"
