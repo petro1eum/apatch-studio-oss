@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 import tomllib
@@ -45,14 +46,16 @@ PROHIBITED_PATHS = {
 
 
 def tracked_files() -> list[Path]:
+    completed = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
     return [
-        path for path in ROOT.rglob("*")
-        if path.is_file()
-        and ".git" not in path.parts
-        and ".venv" not in path.parts
-        and "node_modules" not in path.parts
-        and "__pycache__" not in path.parts
-        and "dist" not in path.parts
+        ROOT / Path(raw.decode("utf-8"))
+        for raw in completed.stdout.split(b"\0")
+        if raw
     ]
 
 
@@ -94,7 +97,9 @@ def test_publication_hygiene_fails_closed() -> None:
                 violations.append(f"{relative}: {label}")
     assert violations == []
     assert not (ROOT / ".git/shallow").exists(), "public history must not be copied"
-    assert not (ROOT / ".trustchain").exists(), "private signing ledger must not be copied"
+    assert not any(".trustchain" in path.parts for path in tracked_files()), (
+        "private signing ledger must not be tracked in the public source"
+    )
 
 
 def test_readme_describes_the_real_product_and_uses_public_links() -> None:

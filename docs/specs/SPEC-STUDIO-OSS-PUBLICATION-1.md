@@ -64,11 +64,13 @@ all release-facing links are absolute public URLs.
 
 ## R9 Candidate-bound release evidence
 
-A machine-readable release record binds the private source commit, clean public
-commit, wheel and sdist hashes, and every release verification command. Placeholder
-or mutable identifiers fail the gate.
+A machine-readable release record binds the attested source commit, clean public
+candidate commit, wheel and sdist hashes, and every release verification command.
+The record version must equal package metadata; placeholder or mutable identifiers
+fail the gate. The release gate also exercises real-workspace adapter and API smoke
+paths without depending on a checkout directory name or a sibling repository.
 
-(verify: python3 -m pytest tests/oss_publication/test_release_evidence.py -q)
+(verify: python3 -m pytest tests/oss_publication/test_release_evidence.py tests/test_adapter.py::test_adapter_reads_real_apatch_workspace tests/test_api.py::test_authenticated_real_workspace_smoke -q)
 
 ## Traceability
 
