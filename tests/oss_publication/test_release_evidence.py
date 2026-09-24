@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 import subprocess
+import tomllib
 from pathlib import Path
 
 
@@ -30,9 +31,11 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
 
 def test_release_evidence_is_complete_and_immutable() -> None:
     evidence = _load()
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    version = str(project["version"])
 
     assert evidence["schema"] == "apatch.studio.oss-publication.v1"
-    assert evidence["version"] == "0.1.0"
+    assert evidence["version"] == version
     assert HEX_40.fullmatch(str(evidence["source_commit"]))
     assert HEX_40.fullmatch(str(evidence["public_candidate_commit"]))
 
@@ -47,8 +50,8 @@ def test_release_evidence_is_complete_and_immutable() -> None:
     artifacts = evidence["artifacts"]
     assert isinstance(artifacts, list)
     assert [item["filename"] for item in artifacts] == [
-        "apatch_studio-0.1.0-py3-none-any.whl",
-        "apatch_studio-0.1.0.tar.gz",
+        f"apatch_studio-{version}-py3-none-any.whl",
+        f"apatch_studio-{version}.tar.gz",
     ]
     assert all(HEX_64.fullmatch(item["sha256"]) for item in artifacts)
 

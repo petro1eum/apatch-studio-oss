@@ -1,16 +1,16 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.0",
-  "source_commit": "4a1d70f2e7b92f62fc0b595510c223886036a27b",
-  "public_candidate_commit": "3654a9c9fbcd3326092630643dbbc218f3abd606",
+  "version": "0.1.1",
+  "source_commit": "cfb20bbb4b6ae65853f99469dcffa17a00cc3def",
+  "public_candidate_commit": "31b3e739733a40a3722c042577006b1c22755f07",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.0-py3-none-any.whl",
-      "sha256": "4ae5cc3c16de081a2c343dbb0a3e05191c54e083cd89ab25e42dd6ead8c4a51b"
+      "filename": "apatch_studio-0.1.1-py3-none-any.whl",
+      "sha256": "72992c74c1c0b85d313b0fe7c2b412f8f412d0e582b0003b264cf2d4cf74504c"
     },
     {
-      "filename": "apatch_studio-0.1.0.tar.gz",
-      "sha256": "d1b5e7496f3b9daa40587cbe678d2c6380309b2f677256ef53711260ee95b66c"
+      "filename": "apatch_studio-0.1.1.tar.gz",
+      "sha256": "72f4fb1cb6a624582198666d4cf9dd47cd58c2de7dec0604ae6197dfc14df9aa"
     }
   ],
   "verification": [
@@ -19,21 +19,21 @@
       "result": "passed"
     },
     {
-      "command": ".venv/bin/pytest -q",
-      "result": "passed: 622 tests"
+      "command": "python3 -m pytest -q",
+      "result": "passed: 633 tests"
     },
     {
-      "command": ".venv/bin/python -m build --outdir dist",
+      "command": "python3 -m build --outdir dist",
       "result": "passed"
     },
     {
-      "command": ".venv/bin/python -m twine check dist/*",
+      "command": "python3 -m twine check dist/*",
       "result": "passed"
     },
     {
-      "command": ".venv/bin/pytest -q tests/oss_publication/test_distribution_artifact.py::test_isolated_wheel_serves_the_bundled_client",
+      "command": "python3 -m pytest -q tests/oss_publication/test_distribution_artifact.py::test_isolated_wheel_serves_the_bundled_client",
       "result": "passed"
     }
   ],
-  "note": "The candidate commit contains the release code. This evidence-only follow-up records the immutable candidate and artifact hashes."
+  "note": "The attested source change and clean public candidate are immutable public commits. This evidence-only follow-up records the exact candidate and artifact hashes used for publication."
 }
