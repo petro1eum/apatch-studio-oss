@@ -503,6 +503,96 @@ def test_submission_publishes_evidence_then_creates_and_submits_release(tmp_path
     ]
 
 
+def test_source_bound_record_uses_canonical_current_authority(tmp_path):
+    workspace = tmp_path / "mixed-binding-workspace"
+    workspace.mkdir()
+    (workspace / "result.txt").write_bytes(b"verified result\n")
+    record = assignment()
+    canonical = {
+        "binding_id": "tcawieb_" + "c" * 32,
+        "tenant_id": record["tenant_id"],
+        "project_group_id": record["project_group_id"],
+        "work_item_id": record["work_item_id"],
+        "accepted_work_item_hash": record["work_item_hash"],
+        "accepted_authority_version": record["authority_version"],
+        "current_work_item_hash": "sha256:" + "9" * 64,
+        "current_authority_version": record["authority_version"] + 1,
+        "work_program_id": record["work_program_id"],
+        "work_program_hash": record["work_program_hash"],
+        "intent_id": record["intent_id"],
+        "change_id": record["cowork_change_id"],
+        "change_hash": "sha256:" + "a" * 64,
+        "actor_ref": "member:" + "9" * 32,
+    }
+    source = {
+        "binding_id": record["cowork_source_binding_id"],
+        "tenant_id": canonical["tenant_id"],
+        "project_group_id": canonical["project_group_id"],
+        "work_program_id": canonical["work_program_id"],
+        "work_program_hash": canonical["work_program_hash"],
+        "change_id": canonical["change_id"],
+        "change_hash": canonical["change_hash"],
+        "actor_ref": canonical["actor_ref"],
+    }
+    root = FakeDomain.governed_work_root(workspace)
+    canonical_dir = root / "work_item_execution_bindings"
+    source_dir = root / "bindings"
+    canonical_dir.mkdir(parents=True)
+    source_dir.mkdir(parents=True)
+    canonical_path = canonical_dir / f"{canonical['binding_id']}.json"
+    source_path = source_dir / f"{source['binding_id']}.json"
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    api, client = RoundTripApi(), ResultClient()
+    service = CoworkResultDelivery(
+        workspace, api=api, domain=FakeDomain, delivery=RoundTripDelivery,
+        transport=RoundTripTransport, work_item_acceptance=FakeWorkItemAcceptance,
+        identity_loader=lambda _root: Identity, http_client=client,
+    )
+
+    plan = service.preview(record, relative_path="result.txt")
+    assert (plan["source_binding_id"], plan["work_item_hash"], plan["authority_version"]) == (
+        source["binding_id"], canonical["current_work_item_hash"], canonical["current_authority_version"]
+    )
+    assert plan["authority_version"] != record["authority_version"]
+    receipt = service.submit(
+        record, relative_path="result.txt", plan=plan,
+        confirmation=f"submit:{plan['plan_hash']}",
+    )
+    assert receipt["state"] == "submitted" and len(client.calls) == 2
+    for _url, body, _headers in client.calls:
+        assert (body["expected_work_item_hash"], body["expected_work_item_authority_version"]) == (
+            canonical["current_work_item_hash"], canonical["current_authority_version"]
+        )
+
+    before_calls = len(api.calls)
+    stale = {**canonical, "current_authority_version": canonical["current_authority_version"] + 1}
+    canonical_path.write_text(json.dumps(stale), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="stale or changed"):
+        service.submit(
+            record, relative_path="result.txt", plan=plan,
+            confirmation=f"submit:{plan['plan_hash']}",
+        )
+    assert [call[0] for call in api.calls[before_calls:]] == ["build", "preview"]
+    assert len(client.calls) == 2
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+
+    duplicate = {**canonical, "binding_id": "tcawieb_" + "d" * 32}
+    duplicate_path = canonical_dir / f"{duplicate['binding_id']}.json"
+    duplicate_path.write_text(json.dumps(duplicate), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="one exact Cowork work-item binding"):
+        service.preview(record, relative_path="result.txt")
+    duplicate_path.unlink()
+    canonical_path.unlink()
+    with pytest.raises(ResultDeliveryError, match="one exact Cowork work-item binding"):
+        service.preview(record, relative_path="result.txt")
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+    source_path.write_text(json.dumps({**source, "actor_ref": "member:" + "0" * 32}), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="one exact APatch source binding"):
+        service.preview(record, relative_path="result.txt")
+    assert len(client.calls) == 2
+
+
 @pytest.mark.parametrize(
     ("sync_mode", "accepted"),
     [

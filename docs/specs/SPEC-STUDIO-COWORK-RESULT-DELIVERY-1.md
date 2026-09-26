@@ -12,6 +12,7 @@
 | SDR-3 | R3 | covered |
 | SDR-4 | R4 | covered |
 | SDR-5 | R5 | covered |
+| SDR-6 | R6 | covered |
 
 (verify: python3 -m pytest -q tests/result_delivery/test_contract.py::test_rfp_acceptance_is_fully_mapped)
 
@@ -73,6 +74,24 @@ release id, credential, accept/reject decision or work-completion action.
 
 (verify: python3 -m pytest -q tests/result_delivery/test_result_delivery_ui.py)
 
+## R6 Canonical current authority for source-bound result delivery
+
+An accepted WorkItem may leave Studio's durable assignment pointing to a
+`tcpsb_` ProjectSourceBinding while APatch also stores its signed `tcawieb_`
+WorkItem execution binding. When that canonical directory exists, Studio must
+validate every candidate under the pinned Platform key and resolve exactly one
+binding matching the intent, tenant, project, WorkItem, accepted hash/version,
+WorkProgram and Change. The selected source binding must be the unique APatch
+source with the same Change/hash, actor and scope. The disclosure plan and both
+signed release commands use only the canonical binding's **current** WorkItem
+hash/version; the APatch evidence still uses the matching source binding.
+Missing, invalid, mismatched or ambiguous canonical/source bindings fail before
+publication or a release command. A source-only legacy checkout without a
+canonical directory keeps its prior behavior, but cannot claim canonical
+current authority.
+
+(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_source_bound_record_uses_canonical_current_authority)
+
 ## RFP traceability
 
 | RFP id | SPEC Rk | Disposition |
@@ -82,3 +101,4 @@ release id, credential, accept/reject decision or work-completion action.
 | SDR-3 | R3 | covered |
 | SDR-4 | R4 | covered |
 | SDR-5 | R5 | covered |
+| SDR-6 | R6 | covered |

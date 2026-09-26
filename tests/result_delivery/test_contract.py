@@ -32,9 +32,9 @@ def test_rfp_acceptance_is_fully_mapped() -> None:
     spec_text = SPEC.read_text(encoding="utf-8")
     acceptance = _acceptance_ids(rfp_text)
     mapping = _traceability(spec_text)
-    assert acceptance == {"SDR-1", "SDR-2", "SDR-3", "SDR-4", "SDR-5"}
+    assert acceptance == {"SDR-1", "SDR-2", "SDR-3", "SDR-4", "SDR-5", "SDR-6"}
     assert set(mapping) == acceptance
-    assert set(mapping.values()) == {"R1", "R2", "R3", "R4", "R5"}
+    assert set(mapping.values()) == {"R1", "R2", "R3", "R4", "R5", "R6"}
     for requirement in mapping.values():
         section = re.search(
             rf"^## {requirement} .+?\n(.*?)(?=^## |\Z)",

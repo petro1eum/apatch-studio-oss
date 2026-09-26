@@ -466,14 +466,55 @@ class CoworkResultDelivery:
         exact: Mapping[str, Any],
     ) -> tuple[str, str, int]:
         selected = str(exact["cowork_source_binding_id"])
-        if selected.startswith("tcpsb_"):
-            return (
-                selected,
-                str(exact["work_item_hash"]),
-                int(exact["authority_version"]),
-            )
-
+        selected_source = selected if selected.startswith("tcpsb_") else None
         root = self._domain.governed_work_root(str(self.workspace))
+        if selected_source is not None:
+            canonical_directory = root / "work_item_execution_bindings"
+            if not canonical_directory.is_dir():
+                # Source-only legacy checkouts predate WorkItem acceptance.
+                return (
+                    selected_source,
+                    str(exact["work_item_hash"]),
+                    int(exact["authority_version"]),
+                )
+            try:
+                config = self._delivery.load_config(str(self.workspace))
+                validator = self._work_item_acceptance
+                if validator is None:
+                    from apatch import work_item_acceptance as validator
+                matches = []
+                expected = {
+                    "tenant_id": exact["tenant_id"],
+                    "project_group_id": exact["project_group_id"],
+                    "work_item_id": exact["work_item_id"],
+                    "accepted_work_item_hash": exact["work_item_hash"],
+                    "accepted_authority_version": exact["authority_version"],
+                    "work_program_id": exact["work_program_id"],
+                    "work_program_hash": exact["work_program_hash"],
+                    "intent_id": exact["intent_id"],
+                    "change_id": exact["cowork_change_id"],
+                }
+                for path in sorted(canonical_directory.glob("tcawieb_*.json")):
+                    if path.is_symlink():
+                        raise ValueError("symlinked WorkItem binding")
+                    candidate = validator.validate_binding(
+                        json.loads(path.read_text(encoding="utf-8")),
+                        trusted_keys=config["binding_authority_keys"],
+                    )
+                    if candidate.get("binding_id") != path.stem:
+                        raise ValueError("WorkItem binding filename mismatch")
+                    if all(candidate.get(field) == value for field, value in expected.items()):
+                        matches.append(candidate)
+            except Exception as exc:
+                raise ResultDeliveryError(
+                    "local Cowork work-item binding could not be verified"
+                ) from exc
+            if len(matches) != 1:
+                raise ResultDeliveryError(
+                    "assignment does not resolve to one exact Cowork work-item binding"
+                )
+            selected = str(matches[0]["binding_id"])
+
         canonical_path = root / "work_item_execution_bindings" / f"{selected}.json"
         try:
             raw = json.loads(canonical_path.read_text(encoding="utf-8"))
@@ -544,7 +585,10 @@ class CoworkResultDelivery:
                     )
                 ):
                     source_bindings.append(candidate)
-        if len(source_bindings) != 1:
+        if len(source_bindings) != 1 or (
+            selected_source is not None
+            and source_bindings[0].get("binding_id") != selected_source
+        ):
             raise ResultDeliveryError(
                 "assignment does not resolve to one exact APatch source binding"
             )
