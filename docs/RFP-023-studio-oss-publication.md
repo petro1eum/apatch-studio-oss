@@ -80,3 +80,4 @@ inspected and an isolated wheel must serve the bundled UI.
 | OSSPUB-7 | Secret, private-path and repository-history scans fail closed before publication | MUST |
 | OSSPUB-8 | Public documentation accurately describes the before/after value, standalone boundary, Cowork connection and data-handling limits | MUST |
 | OSSPUB-9 | Release evidence records the private source commit, public commit, artifact hashes and executed commands without copying private history | MUST |
+| OSSPUB-10 | Advancing the package version creates an explicit governed release candidate bound to the prior published version and attested source commit. Candidate preparation never claims wheel qualification or PyPI publication; OSSPUB-9 remains the final release gate | MUST |

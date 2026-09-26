@@ -72,6 +72,18 @@ paths without depending on a checkout directory name or a sibling repository.
 
 (verify: python3 -m pytest tests/oss_publication/test_release_evidence.py tests/test_adapter.py::test_adapter_reads_real_apatch_workspace tests/test_api.py::test_authenticated_real_workspace_smoke -q)
 
+## R10 Governed next-version candidate
+
+A version advance is preparation, not publication. A checked-in candidate record
+names the exact next package version, the previous published version, one
+attested source commit and the SPEC requirement that changed the product.
+The package metadata must match this candidate and the version must advance.
+The previous immutable publication record may remain at the previous version
+until the new wheel and sdist have been built and qualified under R9. A candidate
+record alone never satisfies the release gate or claims a PyPI upload.
+
+(verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py::test_governed_candidate_version_is_exact_and_advances)
+
 ## Traceability
 
 | RFP acceptance | SPEC requirement | Status |
@@ -85,3 +97,4 @@ paths without depending on a checkout directory name or a sibling repository.
 | OSSPUB-7 | R7 | covered |
 | OSSPUB-8 | R8 | covered |
 | OSSPUB-9 | R9 | covered |
+| OSSPUB-10 | R10 | covered |
