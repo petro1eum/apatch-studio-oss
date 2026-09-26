@@ -49,7 +49,10 @@ shows a receipt and can replay safely after a lost response.
 
 A Platform outage leaves the preview and all source local. A failed evidence
 admission or WorkRelease command fails closed and can be retried with the same
-idempotency keys. A changed file, task pin, connection generation, evidence bundle
+idempotency keys. A rejected, unrelated outbox entry remains visible and retryable;
+it cannot block a new submission once that submission's own evidence admission has
+an exact APatch-validated acknowledgement. Studio never clears or retires another
+entry merely to make a result appear delivered. A changed file, task pin, connection generation, evidence bundle
 or publication plan invalidates the confirmation and requires a new preview.
 
 ## Acceptance
@@ -58,6 +61,6 @@ or publication plan invalidates the confirmation and requires a new preview.
 | --- | --- | --- |
 | SDR-1 | Studio accepts only a bounded workspace-relative regular result file, derives its SHA-256 and size locally, builds exact APatch evidence for the accepted source binding, and performs no network mutation during preview | MUST |
 | SDR-2 | The preview is a closed canonical disclosure plan bound to the exact intent, task/program/version, connection generation, result hash, evidence bundle and claimed time; submit requires `submit:<plan_hash>` and recomputes the plan before any Platform mutation | MUST |
-| SDR-3 | Submission uses the same enrolled APatch key to publish and acknowledge the previewed evidence, then invoke the signed Platform create and submit commands with server-derived evidence and independent idempotency keys | MUST |
+| SDR-3 | Submission uses the same enrolled APatch key to publish the previewed evidence, requires the exact queued evidence entry's matching APatch-validated Platform acknowledgement (entry/request/bundle/scope), then invokes signed create and submit commands with server-derived evidence and independent idempotency keys; unrelated pending or rejected entries remain visible but do not veto this acknowledgement | MUST |
 | SDR-4 | Exact retries are safe, and durable local state contains only the plan/result/evidence hashes plus bounded draft/submitted receipt identifiers and states—never result bytes, local paths, prompts, source, credentials or review capability | MUST |
 | SDR-5 | The Inbox visibly exposes Prepare submission, the exact disclosure preview, Submit to Cowork and the final receipt for a source-bound consumed assignment; it exposes no manual hash/id fields and the performer cannot accept/reject or complete work from Studio | MUST |
