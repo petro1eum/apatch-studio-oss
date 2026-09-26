@@ -39,14 +39,19 @@ changed file, plan, evidence, task pin or confirmation fails before publication.
 
 ## R3 Signed APatch-to-Cowork round trip
 
-After consent, Studio publishes only the previewed evidence plan, synchronizes it
-to a signed Platform admission receipt, then makes the exact signed result-create
+After consent, Studio publishes only the previewed evidence plan and synchronizes
+the outbox. It requires an existing APatch-validated Platform admission ACK for
+that exact queued entry, matching the publication plan, request hash, tenant,
+project, client, command and bundle id/hash. Missing or mismatched ACK fails
+before any WorkRelease mutation, even when aggregate sync reports success. An
+unrelated rejected or pending entry remains visible in the outbox but does not
+veto the exact ACK or get silently retired. Studio then makes signed result-create
 and result-submit requests with the enrolled workspace key. Both requests carry
 the accepted task/program/version pins, create supplies only outcome hash and
 admitted bundle id, and create/submit use distinct deterministic idempotency keys.
 The returned receipts are scope-checked and contain only bounded safe fields.
 
-(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_submission_publishes_evidence_then_creates_and_submits_release)
+(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_submission_publishes_evidence_then_creates_and_submits_release tests/result_delivery/test_result_delivery.py::test_result_submission_requires_only_its_exact_platform_ack)
 
 ## R4 Minimal durable and retry-safe state
 
