@@ -1,0 +1,9 @@
+{
+  "schema": "apatch.studio.oss-candidate.v1",
+  "version": "0.1.2",
+  "previous_published_version": "0.1.1",
+  "source_commit": "12ddf64d3685c2edee621e56d6b4beea38d243e2",
+  "source_file": "apatch_studio/result_delivery.py",
+  "source_file_sha256": "48382c66059a908c5b2a0c975cf70acd6fa62b0aa5c40f201fe531972c88f9a2",
+  "requirement": "SPEC-STUDIO-COWORK-RESULT-DELIVERY-1#R6"
+}

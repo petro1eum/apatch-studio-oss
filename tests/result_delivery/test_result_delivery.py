@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from apatch import governed_work_delivery as runtime_delivery
 
 from apatch_studio.result_delivery import (
     MAX_RESULT_BYTES,
@@ -21,6 +22,10 @@ class FakeDomain:
     @classmethod
     def value_hash(cls, value):
         return "sha256:" + hashlib.sha256(cls.canonical_bytes(value)).hexdigest()
+
+    @classmethod
+    def document_hash(cls, document):
+        return cls.value_hash({key: value for key, value in document.items() if key != "signature"})
 
     @staticmethod
     def governed_work_root(target_dir):
@@ -224,19 +229,100 @@ class Identity:
 
 
 class RoundTripApi(FakeApi):
+    def __init__(self, sync_mode="clean"):
+        super().__init__()
+        self.sync_mode = sync_mode
+        self.bundle = {"bundle_id": self.bundle_id}
+        self.bundle_hash = FakeDomain.document_hash(self.bundle)
+        self.request_hash = "sha256:" + "a" * 64
+        self.entry_id = "apgwo_" + "a" * 32
+        self.entry_path = None
+        self.unrelated_path = None
+
     def publish_governed_evidence(self, target_dir, **request):
         self.calls.append(("publish", target_dir, request))
         assert request["confirmation"] == "publish:sha256:" + "d" * 64
-        return {"ok": True, "delivery": {"status": "queued"}}
+        outbox = FakeDomain.governed_work_root(target_dir) / "outbox"
+        outbox.mkdir(parents=True, exist_ok=True)
+        self.entry_path = outbox / "fixture.json"
+        self.entry_path.write_text(json.dumps({
+            "schema": "apatch.governed-work-outbox-entry.v1",
+            "entry_id": self.entry_id,
+            "command": "evidence_admission",
+            "tenant_id": assignment()["tenant_id"],
+            "project_group_id": assignment()["project_group_id"],
+            "client_id": "member:" + "9" * 32,
+            "idempotency_key": f"evidence-admission:{self.bundle_id}",
+            "request_hash": self.request_hash,
+            "endpoint": f"/api/internal/project-groups/{assignment()['project_group_id']}/governed-work/evidence-admissions",
+            "payload": {"evidence_bundle": self.bundle, "timesheet_draft": {}},
+            "created_at": "2026-09-26T12:00:00+00:00",
+        }), encoding="utf-8")
+        return {
+            "ok": True,
+            "plan_hash": request["plan"]["plan_hash"],
+            "delivery": {
+                "status": "queued",
+                "entry_id": self.entry_id,
+                "request_hash": self.request_hash,
+            },
+        }
 
     def sync_governed_work(self, target_dir, **request):
         self.calls.append(("sync", target_dir, request))
         assert request["request_key_provider"] is Identity.key_provider
+        if self.sync_mode != "missing_ack":
+            ack = {
+                "schema": "apatch.governed-work-ack.v1",
+                "entry_id": self.entry_id,
+                "request_hash": self.request_hash,
+                "command": "evidence_admission",
+                "resource_id": self.bundle_id,
+                "resource_hash": self.bundle_hash,
+                "platform_receipt_hash": "sha256:" + "f" * 64,
+                "projection_cursor": 1,
+                "acknowledged_at": "2026-09-26T12:00:01+00:00",
+            }
+            if self.sync_mode == "wrong_request":
+                ack["request_hash"] = "sha256:" + "0" * 64
+            if self.sync_mode == "wrong_resource":
+                ack["resource_id"] = "apweb_" + "0" * 32
+            runtime_delivery._ack_path(self.entry_path).write_text(
+                json.dumps(ack), encoding="utf-8"
+            )
+        if self.sync_mode in {"wrong_scope", "wrong_bundle"}:
+            entry = json.loads(self.entry_path.read_text(encoding="utf-8"))
+            if self.sync_mode == "wrong_scope":
+                entry["tenant_id"] = "22222222-2222-4222-8222-222222222222"
+            else:
+                entry["payload"]["evidence_bundle"]["bundle_id"] = "apweb_" + "0" * 32
+            self.entry_path.write_text(json.dumps(entry), encoding="utf-8")
+        if self.sync_mode == "unrelated_pending":
+            unrelated = json.loads(self.entry_path.read_text(encoding="utf-8"))
+            unrelated_bundle_id = "apweb_" + "b" * 32
+            unrelated["payload"]["evidence_bundle"] = {"bundle_id": unrelated_bundle_id}
+            unrelated["idempotency_key"] = f"evidence-admission:{unrelated_bundle_id}"
+            unrelated["request_hash"] = FakeDomain.value_hash({
+                "command": "admit_evidence", "payload": unrelated["payload"]
+            })
+            unrelated["entry_id"] = "apgwo_" + unrelated["request_hash"][7:39]
+            self.unrelated_path = self.entry_path.with_name("rejected.json")
+            self.unrelated_path.write_text(json.dumps(unrelated), encoding="utf-8")
+            return {
+                "ok": False,
+                "status": "delivery_incomplete",
+                "delivered": 1,
+                "pending": 1,
+                "errors": [{"entry_id": unrelated["entry_id"], "code": "PLATFORM_REJECTED"}],
+            }
         return {"ok": True, "status": "in_sync", "delivered": 1, "pending": 0}
 
 
 class RoundTripDelivery:
     httpx = None
+    _find_outbox_entry = staticmethod(runtime_delivery._find_outbox_entry)
+    _ack_path = staticmethod(runtime_delivery._ack_path)
+    _read_document = staticmethod(runtime_delivery._read_document)
 
     @staticmethod
     def load_config(_target_dir):
@@ -415,6 +501,155 @@ def test_submission_publishes_evidence_then_creates_and_submits_release(tmp_path
         create_url.removeprefix("https://trust-chain.ai"),
         submit_url.removeprefix("https://trust-chain.ai"),
     ]
+
+
+def test_source_bound_record_uses_canonical_current_authority(tmp_path):
+    workspace = tmp_path / "mixed-binding-workspace"
+    workspace.mkdir()
+    (workspace / "result.txt").write_bytes(b"verified result\n")
+    record = assignment()
+    canonical = {
+        "binding_id": "tcawieb_" + "c" * 32,
+        "tenant_id": record["tenant_id"],
+        "project_group_id": record["project_group_id"],
+        "work_item_id": record["work_item_id"],
+        "accepted_work_item_hash": record["work_item_hash"],
+        "accepted_authority_version": record["authority_version"],
+        "current_work_item_hash": "sha256:" + "9" * 64,
+        "current_authority_version": record["authority_version"] + 1,
+        "work_program_id": record["work_program_id"],
+        "work_program_hash": record["work_program_hash"],
+        "intent_id": record["intent_id"],
+        "change_id": record["cowork_change_id"],
+        "change_hash": "sha256:" + "a" * 64,
+        "actor_ref": "member:" + "9" * 32,
+    }
+    source = {
+        "binding_id": record["cowork_source_binding_id"],
+        "tenant_id": canonical["tenant_id"],
+        "project_group_id": canonical["project_group_id"],
+        "work_program_id": canonical["work_program_id"],
+        "work_program_hash": canonical["work_program_hash"],
+        "change_id": canonical["change_id"],
+        "change_hash": canonical["change_hash"],
+        "actor_ref": canonical["actor_ref"],
+    }
+    root = FakeDomain.governed_work_root(workspace)
+    canonical_dir = root / "work_item_execution_bindings"
+    source_dir = root / "bindings"
+    canonical_dir.mkdir(parents=True)
+    source_dir.mkdir(parents=True)
+    canonical_path = canonical_dir / f"{canonical['binding_id']}.json"
+    source_path = source_dir / f"{source['binding_id']}.json"
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+    source_path.write_text(json.dumps(source), encoding="utf-8")
+    api, client = RoundTripApi(), ResultClient()
+    service = CoworkResultDelivery(
+        workspace, api=api, domain=FakeDomain, delivery=RoundTripDelivery,
+        transport=RoundTripTransport, work_item_acceptance=FakeWorkItemAcceptance,
+        identity_loader=lambda _root: Identity, http_client=client,
+    )
+
+    plan = service.preview(record, relative_path="result.txt")
+    assert (plan["source_binding_id"], plan["work_item_hash"], plan["authority_version"]) == (
+        source["binding_id"], canonical["current_work_item_hash"], canonical["current_authority_version"]
+    )
+    assert plan["authority_version"] != record["authority_version"]
+    receipt = service.submit(
+        record, relative_path="result.txt", plan=plan,
+        confirmation=f"submit:{plan['plan_hash']}",
+    )
+    assert receipt["state"] == "submitted" and len(client.calls) == 2
+    for _url, body, _headers in client.calls:
+        assert (body["expected_work_item_hash"], body["expected_work_item_authority_version"]) == (
+            canonical["current_work_item_hash"], canonical["current_authority_version"]
+        )
+
+    before_calls = len(api.calls)
+    stale = {**canonical, "current_authority_version": canonical["current_authority_version"] + 1}
+    canonical_path.write_text(json.dumps(stale), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="stale or changed"):
+        service.submit(
+            record, relative_path="result.txt", plan=plan,
+            confirmation=f"submit:{plan['plan_hash']}",
+        )
+    assert [call[0] for call in api.calls[before_calls:]] == ["build", "preview"]
+    assert len(client.calls) == 2
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+
+    duplicate = {**canonical, "binding_id": "tcawieb_" + "d" * 32}
+    duplicate_path = canonical_dir / f"{duplicate['binding_id']}.json"
+    duplicate_path.write_text(json.dumps(duplicate), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="one exact Cowork work-item binding"):
+        service.preview(record, relative_path="result.txt")
+    duplicate_path.unlink()
+    canonical_path.unlink()
+    with pytest.raises(ResultDeliveryError, match="one exact Cowork work-item binding"):
+        service.preview(record, relative_path="result.txt")
+    canonical_path.write_text(json.dumps(canonical), encoding="utf-8")
+    source_path.write_text(json.dumps({**source, "actor_ref": "member:" + "0" * 32}), encoding="utf-8")
+    with pytest.raises(ResultDeliveryError, match="one exact APatch source binding"):
+        service.preview(record, relative_path="result.txt")
+    assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("sync_mode", "accepted"),
+    [
+        ("unrelated_pending", True),
+        ("missing_ack", False),
+        ("wrong_request", False),
+        ("wrong_resource", False),
+        ("wrong_scope", False),
+        ("wrong_bundle", False),
+    ],
+)
+def test_result_submission_requires_only_its_exact_platform_ack(
+    tmp_path, sync_mode, accepted
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    api = RoundTripApi(sync_mode=sync_mode)
+    client = ResultClient()
+    service = CoworkResultDelivery(
+        workspace,
+        api=api,
+        domain=FakeDomain,
+        delivery=RoundTripDelivery,
+        transport=RoundTripTransport,
+        identity_loader=lambda _root: Identity,
+        http_client=client,
+    )
+    record = assignment()
+    plan = {
+        "platform_origin": "https://trust-chain.ai",
+        "client_subject": "member:" + "9" * 32,
+        "tenant_id": record["tenant_id"],
+        "project_group_id": record["project_group_id"],
+        "work_item_hash": record["work_item_hash"],
+        "authority_version": record["authority_version"],
+        "work_program_id": record["work_program_id"],
+        "work_program_hash": record["work_program_hash"],
+        "result": {"outcome_ref": "sha256:" + "1" * 64},
+        "evidence": {"bundle_id": api.bundle_id, "bundle_hash": api.bundle_hash},
+        "plan_hash": "sha256:" + "d" * 64,
+    }
+    publication = {"plan_hash": "sha256:" + "d" * 64}
+
+    if accepted:
+        receipt = service._deliver(record, plan, publication)
+        assert receipt["state"] == "submitted"
+        assert len(client.calls) == 2
+        assert runtime_delivery._ack_path(api.entry_path).is_file()
+        assert api.unrelated_path.is_file()
+        assert not runtime_delivery._ack_path(api.unrelated_path).exists()
+        assert runtime_delivery.pending_count(str(workspace)) == 1
+    else:
+        with pytest.raises(ResultDeliveryError, match="did not acknowledge"):
+            service._deliver(record, plan, publication)
+        assert client.calls == []
+
+
 class ConnectedGateway:
     connected = True
 

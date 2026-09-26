@@ -1,16 +1,16 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.1",
-  "source_commit": "cfb20bbb4b6ae65853f99469dcffa17a00cc3def",
-  "public_candidate_commit": "31b3e739733a40a3722c042577006b1c22755f07",
+  "version": "0.1.2",
+  "source_commit": "12ddf64d3685c2edee621e56d6b4beea38d243e2",
+  "public_candidate_commit": "bab931a9e4a4efd11e1a7bbaf347bce7f99f6aa3",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.1-py3-none-any.whl",
-      "sha256": "72992c74c1c0b85d313b0fe7c2b412f8f412d0e582b0003b264cf2d4cf74504c"
+      "filename": "apatch_studio-0.1.2-py3-none-any.whl",
+      "sha256": "eea35432f5af6f4911e29675441bb96c9472a6cf511e79fe8d3c9cc3e9dc8146"
     },
     {
-      "filename": "apatch_studio-0.1.1.tar.gz",
-      "sha256": "72f4fb1cb6a624582198666d4cf9dd47cd58c2de7dec0604ae6197dfc14df9aa"
+      "filename": "apatch_studio-0.1.2.tar.gz",
+      "sha256": "1426807a265072754f066e740b34d2e4a50738ee2ff9722c429dcb8b614ca6f5"
     }
   ],
   "verification": [
@@ -19,21 +19,21 @@
       "result": "passed"
     },
     {
-      "command": "python3 -m pytest -q",
-      "result": "passed: 633 tests"
+      "command": "python3 -m pytest -q --ignore=tests/oss_publication/test_release_evidence.py",
+      "result": "passed: 639 tests"
     },
     {
       "command": "python3 -m build --outdir dist",
       "result": "passed"
     },
     {
-      "command": "python3 -m twine check dist/*",
+      "command": "python3 -m twine check dist/apatch_studio-0.1.2-py3-none-any.whl dist/apatch_studio-0.1.2.tar.gz",
       "result": "passed"
     },
     {
       "command": "python3 -m pytest -q tests/oss_publication/test_distribution_artifact.py::test_isolated_wheel_serves_the_bundled_client",
-      "result": "passed"
+      "result": "passed: 1 test"
     }
   ],
-  "note": "The attested source change and clean public candidate are immutable public commits. This evidence-only follow-up records the exact candidate and artifact hashes used for publication."
+  "note": "Qualified candidate artifacts from the attested SDR-6 fix and exact public candidate commit; publication to PyPI is not claimed by this record. The release-evidence gate and full suite run after recording the immutable hashes."
 }

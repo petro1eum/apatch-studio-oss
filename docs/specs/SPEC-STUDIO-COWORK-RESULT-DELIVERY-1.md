@@ -12,6 +12,7 @@
 | SDR-3 | R3 | covered |
 | SDR-4 | R4 | covered |
 | SDR-5 | R5 | covered |
+| SDR-6 | R6 | covered |
 
 (verify: python3 -m pytest -q tests/result_delivery/test_contract.py::test_rfp_acceptance_is_fully_mapped)
 
@@ -39,14 +40,19 @@ changed file, plan, evidence, task pin or confirmation fails before publication.
 
 ## R3 Signed APatch-to-Cowork round trip
 
-After consent, Studio publishes only the previewed evidence plan, synchronizes it
-to a signed Platform admission receipt, then makes the exact signed result-create
+After consent, Studio publishes only the previewed evidence plan and synchronizes
+the outbox. It requires an existing APatch-validated Platform admission ACK for
+that exact queued entry, matching the publication plan, request hash, tenant,
+project, client, command and bundle id/hash. Missing or mismatched ACK fails
+before any WorkRelease mutation, even when aggregate sync reports success. An
+unrelated rejected or pending entry remains visible in the outbox but does not
+veto the exact ACK or get silently retired. Studio then makes signed result-create
 and result-submit requests with the enrolled workspace key. Both requests carry
 the accepted task/program/version pins, create supplies only outcome hash and
 admitted bundle id, and create/submit use distinct deterministic idempotency keys.
 The returned receipts are scope-checked and contain only bounded safe fields.
 
-(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_submission_publishes_evidence_then_creates_and_submits_release)
+(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_submission_publishes_evidence_then_creates_and_submits_release tests/result_delivery/test_result_delivery.py::test_result_submission_requires_only_its_exact_platform_ack)
 
 ## R4 Minimal durable and retry-safe state
 
@@ -68,6 +74,24 @@ release id, credential, accept/reject decision or work-completion action.
 
 (verify: python3 -m pytest -q tests/result_delivery/test_result_delivery_ui.py)
 
+## R6 Canonical current authority for source-bound result delivery
+
+An accepted WorkItem may leave Studio's durable assignment pointing to a
+`tcpsb_` ProjectSourceBinding while APatch also stores its signed `tcawieb_`
+WorkItem execution binding. When that canonical directory exists, Studio must
+validate every candidate under the pinned Platform key and resolve exactly one
+binding matching the intent, tenant, project, WorkItem, accepted hash/version,
+WorkProgram and Change. The selected source binding must be the unique APatch
+source with the same Change/hash, actor and scope. The disclosure plan and both
+signed release commands use only the canonical binding's **current** WorkItem
+hash/version; the APatch evidence still uses the matching source binding.
+Missing, invalid, mismatched or ambiguous canonical/source bindings fail before
+publication or a release command. A source-only legacy checkout without a
+canonical directory keeps its prior behavior, but cannot claim canonical
+current authority.
+
+(verify: python3 -m pytest -q tests/result_delivery/test_result_delivery.py::test_source_bound_record_uses_canonical_current_authority)
+
 ## RFP traceability
 
 | RFP id | SPEC Rk | Disposition |
@@ -77,3 +101,4 @@ release id, credential, accept/reject decision or work-completion action.
 | SDR-3 | R3 | covered |
 | SDR-4 | R4 | covered |
 | SDR-5 | R5 | covered |
+| SDR-6 | R6 | covered |

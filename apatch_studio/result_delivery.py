@@ -143,14 +143,19 @@ class CoworkResultDelivery:
         )
         if not isinstance(published, dict) or published.get("ok") is not True:
             raise ResultDeliveryError("APatch evidence publication could not be queued")
+        queued = published.get("delivery")
+        if (
+            published.get("plan_hash") != publication["plan_hash"]
+            or not isinstance(queued, dict)
+            or queued.get("status") != "queued"
+        ):
+            raise ResultDeliveryError("APatch evidence publication differs from the plan")
         synchronized = self._api.sync_governed_work(
             str(self.workspace),
             request_key_provider=provider,
         )
-        if (
-            not isinstance(synchronized, dict)
-            or synchronized.get("ok") is not True
-            or synchronized.get("pending") != 0
+        if not isinstance(synchronized, dict) or not self._evidence_acknowledged(
+            queued, plan
         ):
             raise ResultDeliveryError("Cowork did not acknowledge the APatch evidence")
 
@@ -210,6 +215,55 @@ class CoworkResultDelivery:
             expected_state="submitted",
         )
         return submitted
+
+    def _evidence_acknowledged(
+        self, queued: Mapping[str, Any], plan: Mapping[str, Any]
+    ) -> bool:
+        entry_id = str(queued.get("entry_id") or "")
+        request_hash = str(queued.get("request_hash") or "")
+        if not re.fullmatch(r"apgwo_[0-9a-f]{32}", entry_id) or not _HASH_RE.fullmatch(
+            request_hash
+        ):
+            return False
+        try:
+            entry_path, entry = self._delivery._find_outbox_entry(
+                str(self.workspace), entry_id
+            )
+            ack_path = self._delivery._ack_path(entry_path)
+            if not ack_path.is_file():
+                return False
+            ack = self._delivery._read_document(ack_path)
+            bundle = entry["payload"]["evidence_bundle"]
+            evidence = plan["evidence"]
+            expected_endpoint = (
+                f"/api/internal/project-groups/{plan['project_group_id']}"
+                "/governed-work/evidence-admissions"
+            )
+            return (
+                entry.get("schema") == "apatch.governed-work-outbox-entry.v1"
+                and entry.get("entry_id") == entry_id
+                and entry.get("request_hash") == request_hash
+                and entry.get("command") == "evidence_admission"
+                and entry.get("tenant_id") == plan["tenant_id"]
+                and entry.get("project_group_id") == plan["project_group_id"]
+                and entry.get("client_id") == plan["client_subject"]
+                and entry.get("endpoint") == expected_endpoint
+                and entry.get("idempotency_key")
+                == f"evidence-admission:{evidence['bundle_id']}"
+                and bundle.get("bundle_id") == evidence["bundle_id"]
+                and self._domain.document_hash(bundle) == evidence["bundle_hash"]
+                and ack.get("schema") == "apatch.governed-work-ack.v1"
+                and ack.get("entry_id") == entry_id
+                and ack.get("request_hash") == request_hash
+                and ack.get("command") == "evidence_admission"
+                and ack.get("resource_id") == evidence["bundle_id"]
+                and ack.get("resource_hash") == evidence["bundle_hash"]
+                and _HASH_RE.fullmatch(str(ack.get("platform_receipt_hash") or ""))
+                and type(ack.get("projection_cursor")) is int
+                and ack["projection_cursor"] >= 0
+            )
+        except (AttributeError, KeyError, OSError, TypeError, ValueError):
+            return False
 
     def _workspace_key_provider(self) -> Any:
         identity = self._identity_loader(str(self.workspace))
@@ -412,14 +466,55 @@ class CoworkResultDelivery:
         exact: Mapping[str, Any],
     ) -> tuple[str, str, int]:
         selected = str(exact["cowork_source_binding_id"])
-        if selected.startswith("tcpsb_"):
-            return (
-                selected,
-                str(exact["work_item_hash"]),
-                int(exact["authority_version"]),
-            )
-
+        selected_source = selected if selected.startswith("tcpsb_") else None
         root = self._domain.governed_work_root(str(self.workspace))
+        if selected_source is not None:
+            canonical_directory = root / "work_item_execution_bindings"
+            if not canonical_directory.is_dir():
+                # Source-only legacy checkouts predate WorkItem acceptance.
+                return (
+                    selected_source,
+                    str(exact["work_item_hash"]),
+                    int(exact["authority_version"]),
+                )
+            try:
+                config = self._delivery.load_config(str(self.workspace))
+                validator = self._work_item_acceptance
+                if validator is None:
+                    from apatch import work_item_acceptance as validator
+                matches = []
+                expected = {
+                    "tenant_id": exact["tenant_id"],
+                    "project_group_id": exact["project_group_id"],
+                    "work_item_id": exact["work_item_id"],
+                    "accepted_work_item_hash": exact["work_item_hash"],
+                    "accepted_authority_version": exact["authority_version"],
+                    "work_program_id": exact["work_program_id"],
+                    "work_program_hash": exact["work_program_hash"],
+                    "intent_id": exact["intent_id"],
+                    "change_id": exact["cowork_change_id"],
+                }
+                for path in sorted(canonical_directory.glob("tcawieb_*.json")):
+                    if path.is_symlink():
+                        raise ValueError("symlinked WorkItem binding")
+                    candidate = validator.validate_binding(
+                        json.loads(path.read_text(encoding="utf-8")),
+                        trusted_keys=config["binding_authority_keys"],
+                    )
+                    if candidate.get("binding_id") != path.stem:
+                        raise ValueError("WorkItem binding filename mismatch")
+                    if all(candidate.get(field) == value for field, value in expected.items()):
+                        matches.append(candidate)
+            except Exception as exc:
+                raise ResultDeliveryError(
+                    "local Cowork work-item binding could not be verified"
+                ) from exc
+            if len(matches) != 1:
+                raise ResultDeliveryError(
+                    "assignment does not resolve to one exact Cowork work-item binding"
+                )
+            selected = str(matches[0]["binding_id"])
+
         canonical_path = root / "work_item_execution_bindings" / f"{selected}.json"
         try:
             raw = json.loads(canonical_path.read_text(encoding="utf-8"))
@@ -490,7 +585,10 @@ class CoworkResultDelivery:
                     )
                 ):
                     source_bindings.append(candidate)
-        if len(source_bindings) != 1:
+        if len(source_bindings) != 1 or (
+            selected_source is not None
+            and source_bindings[0].get("binding_id") != selected_source
+        ):
             raise ResultDeliveryError(
                 "assignment does not resolve to one exact APatch source binding"
             )
