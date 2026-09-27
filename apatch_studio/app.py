@@ -78,6 +78,10 @@ from apatch_studio.security import StudioRequestGuard, security_headers
 from apatch_studio.lock_authority import LockAuthority, LockAuthorityError, approver_for
 from apatch_studio.run_store import default_state_root
 from apatch_studio.sdd_workflow import SddWorkflowError, SddWorkflowFacade
+from apatch_studio.draft_amendment_workflow import DraftAmendmentWorkflow, DraftProposalRequest, DraftApprovalRequest
+from apatch_studio.authoring_workflow import AuthoringWorkflow, AuthoringProposalRequest, AuthoringApprovalRequest, ImplementationCandidateRequest
+from apatch_studio.candidate_workflow import CandidateWorkflow
+from apatch_studio.judge_amendment_workflow import JudgeAmendmentWorkflow, JudgeAmendmentRequest
 
 
 def _frontend_root() -> Path:
@@ -169,6 +173,9 @@ def create_app(
     runtime_contribution = contribution_workflow or ContributionWorkflow(workspace)
     runtime_delivery_pack = delivery_pack_workflow or DeliveryPackWorkflow(workspace)
     runtime_sdd = sdd_facade or SddWorkflowFacade(workspace)
+    runtime_authoring = AuthoringWorkflow(workspace)
+    runtime_candidates = CandidateWorkflow(workspace)
+    runtime_judge_amendments = JudgeAmendmentWorkflow(workspace)
     lock_authority = LockAuthority(
         Path(workspace) / ".apatch",
         identity_root=identity_root or default_state_root(),
@@ -180,6 +187,7 @@ def create_app(
             overview_supplier=runtime_adapter.overview,
         ).capture,
     )
+    runtime_drafts = DraftAmendmentWorkflow(workspace, runtime_runs)
     runtime_intents = None
     if (
         intent_manager is not None
@@ -391,6 +399,46 @@ def create_app(
     ) -> dict[str, Any]:
         return runtime_sdd.contract_review(spec_id, requirement_id, with_snapshot=True)
 
+
+    @app.get("/api/v1/specs/{spec_id}/requirements/{requirement_id}/judge-amendment")
+    def review_judge_amendment(spec_id: str, requirement_id: str):
+        return runtime_judge_amendments.review(spec_id, requirement_id)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/judge-amendment")
+    def propose_judge_amendment(spec_id: str, requirement_id: str, request: JudgeAmendmentRequest):
+        return runtime_judge_amendments.propose(spec_id, requirement_id, request)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/judge-amendment/approve")
+    def approve_judge_amendment(spec_id: str, requirement_id: str, request: AuthoringApprovalRequest):
+        approver = approver_for(lock_authority.identity_root)
+        return runtime_judge_amendments.approve(spec_id, requirement_id, request, authority_id=approver["id"])
+
+    @app.get("/api/v1/specs/{spec_id}/requirements/{requirement_id}/authoring")
+    def review_authoring(spec_id: str, requirement_id: str) -> dict[str, Any]:
+        return runtime_authoring.review(spec_id, requirement_id)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/authoring")
+    def propose_authoring(spec_id: str, requirement_id: str, request: AuthoringProposalRequest) -> dict[str, Any]:
+        return runtime_authoring.propose(spec_id, requirement_id, request)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/authoring/approve")
+    def approve_authoring(spec_id: str, requirement_id: str, request: AuthoringApprovalRequest) -> dict[str, Any]:
+        approver = approver_for(lock_authority.identity_root)
+        return runtime_authoring.approve(spec_id, requirement_id, request, authority_id=approver["id"])
+
+    @app.get("/api/v1/specs/{spec_id}/requirements/{requirement_id}/implementation-candidate")
+    def review_candidate(spec_id: str, requirement_id: str) -> dict[str, Any]:
+        return runtime_candidates.review(spec_id, requirement_id)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/implementation-candidate")
+    def select_candidate(spec_id: str, requirement_id: str, request: ImplementationCandidateRequest) -> dict[str, Any]:
+        return runtime_candidates.select(spec_id, requirement_id, request)
+
+    @app.post("/api/v1/specs/{spec_id}/requirements/{requirement_id}/implementation-candidate/approve")
+    def approve_candidate(spec_id: str, requirement_id: str, request: AuthoringApprovalRequest) -> dict[str, Any]:
+        approver = approver_for(lock_authority.identity_root)
+        return runtime_candidates.approve(spec_id, requirement_id, request, authority_id=approver["id"])
+
     @app.get("/api/v1/specs/{spec_id}/requirements/{requirement_id}/lock")
     def lock_exchange(spec_id: str, requirement_id: str) -> dict[str, Any]:
         return lock_authority.view(spec_id, requirement_id)
@@ -405,7 +453,7 @@ def create_app(
     ) -> dict[str, Any]:
         # Asking is not lifting. This records the request and returns the
         # exchange; the boundary keeps refusing work until somebody answers.
-        lock_authority.request_release(spec_id, requirement_id, reason=request.reason)
+        lock_authority.request_release(spec_id, requirement_id, reason=request.reason, request_id=request.request_id)
         return lock_authority.view(spec_id, requirement_id)
 
     @app.post(
@@ -421,6 +469,7 @@ def create_app(
             requirement_id,
             decision=request.decision,
             reason=request.reason,
+            request_id=request.request_id,
         )
         return lock_authority.view(spec_id, requirement_id)
 
@@ -611,6 +660,19 @@ def create_app(
     @app.get("/api/v1/runs/{run_id}")
     def get_run(run_id: str) -> dict[str, Any]:
         return runtime_runs.get(run_id)
+
+    @app.get("/api/v1/runs/{run_id}/draft-amendment")
+    def review_draft_amendment(run_id: str) -> dict[str, Any]:
+        return runtime_drafts.review(run_id)
+
+    @app.post("/api/v1/runs/{run_id}/draft-amendment")
+    def propose_draft_amendment(run_id: str, request: DraftProposalRequest) -> dict[str, Any]:
+        return runtime_drafts.propose(run_id, request)
+
+    @app.post("/api/v1/runs/{run_id}/draft-amendment/approve")
+    def approve_draft_amendment(run_id: str, request: DraftApprovalRequest) -> dict[str, Any]:
+        owner = approver_for(lock_authority.identity_root)
+        return runtime_drafts.approve(run_id, request, owner=owner)
 
     @app.post("/api/v1/runs/{run_id}/cancel")
     def cancel_run(run_id: str) -> dict[str, Any]:

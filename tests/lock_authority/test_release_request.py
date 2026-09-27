@@ -181,6 +181,8 @@ def test_asking_twice_before_an_answer_is_refused(tmp_path):
     client.post(FREEZE, headers=headers, json=APPROVAL)
     client.post(ASK_URL, headers=headers, json=ASK)
 
-    again = client.post(ASK_URL, headers=headers, json=ASK)
+    retry = client.post(ASK_URL, headers=headers, json=ASK)
+    assert retry.status_code == 200
+    again = client.post(ASK_URL, headers=headers, json={**ASK, "request_id": "apsreq_second_request"})
     assert again.status_code == 422
     assert again.json()["error_code"] == "lock_approver_unknown"

@@ -479,8 +479,9 @@ def build_governed_prompt(
             "1. Use only the Studio-supplied context capsule; do not open project files.",
             "2. Run APatch doctor, then continue an exact-lineage partial contract when the capsule contains one.",
             "3. Draft the RFP, SPEC, frozen test contract and preparation package completely before writing.",
+            "If the capsule reports an existing frozen contract and this lineage has no SPEC yet, the following write steps do not apply: return a JSON array of exact {path, content} files for the original run owner-review surface. Do not call session_start, borrow an unrelated contract, or claim approval. The owner-reviewed initial preparation transaction creates the package without replacing the current frozen profile; implementation still needs its separate owner freeze.",
             "4. For a fresh lineage, open one contract-authoring session with apatch_session_start(intent=..., artifacts=['spec-bootstrap:<preallocated SPEC id>#R0', 'rfp:<preallocated RFP id>']) and create the complete RFP, complete SPEC, frozen test/fixture files and preparation package in one mutation batch of that session (apatch_generate_batch, apatch_simulate, apatch_apply_session), then verify, attest and end it.",
-            "5. If the exact-lineage SPEC scaffold already exists, call apatch_session_start once for the exact SPEC#R0, then call apatch_execute_next with that same session id/token, the complete ordered needles list and no finalize flag.",
+            "5. If the exact-lineage SPEC scaffold already exists, use SPEC#R0 only when that requirement exists and owns the intended preparation files. Otherwise prepare an exact path/content draft repair for owner review in Studio under the original run. Do not invent R0, replace the lineage, claim owner approval, or disable strict ownership. After approval, continue with the same SPEC and its separate owner freeze.",
             "6. Repeat apatch_execute_next for the same session with no new needles while each response says continue=true. Only after continue=false, call it once with finalize=true and no needles. Do not place generate_batch, resume_session or rollback between these calls.",
             "Use at most 8 structured repository inspection command starts before the first contract write.",
             "After the first contract-authoring event, do not perform further repository inspection.",
@@ -636,6 +637,10 @@ def build_planning_context(
     root = Path(workspace).expanduser().resolve()
     rfp_id, spec_id = planning_contract_ids(contract_run_id)
     sections: list[str] = []
+    if (root / ".apatch/sdd_verification_contract.json").exists():
+        sections.append("## Existing frozen contract\nThis workspace already has a frozen verification contract. "
+                        "For a new lineage, return the complete exact path/content preparation package for "
+                        "owner review; do not open a legacy bootstrap session or reuse another contract.")
     for label, relative, byte_limit in (
         ("Project operating contract", Path("AGENTS.md"), 8_000),
         ("Project summary", Path("README.md"), 12_000),

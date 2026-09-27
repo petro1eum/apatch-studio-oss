@@ -51,7 +51,11 @@ A plan-only run exposes no code delivery, commit, push, pull request, source dif
 
 The plan route reuses the existing contract review, owner freeze and requirement execution surfaces. Studio does not create a second specification store, verification contract or execution runtime.
 
-(verify: python3 -m pytest tests/plan_handoff/test_plan_ui_contract.py -q -k owner_continuation)
+An incomplete strict draft with no suitable R0 can be repaired only under its original planning-run lineage. Studio shows exact before/after bytes and a snapshot before explicit owner confirmation, resolves the approver server-side, and delegates mutations/signing/recovery to Core. Session-token and origin protections apply. Stale snapshots, caller-selected owners, active runs, cycles, source/policy changes and frozen drafts fail closed. Pending signed repairs block freezing; retry resumes the same transaction, including after process interruption. Completion is preparation evidence only, never functional acceptance. No unreviewed test module is imported or executed by the repair. API tests use disposable signing identities and independently validate signed completion after restart.
+
+The same owner-review surface supports an absent new-lineage contract in a workspace with an existing frozen profile. The server selects initial preparation from actual workspace state, not a caller authority flag; Core preserves the existing profile and judge bytes. The planning capsule explicitly directs the runner to propose files instead of starting a blocked bootstrap session. Approval resolves the owner server-side and does not grant implementation or replace a contract.
+
+(verify: python3 -m pytest tests/plan_handoff/test_plan_ui_contract.py tests/plan_handoff/test_draft_workflow.py tests/plan_handoff/test_initial_draft_workflow.py -q -k "owner_continuation or draft or repair or pending")
 
 ## R6 Non-destructive scope audit instruction
 

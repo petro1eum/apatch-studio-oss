@@ -1,3 +1,6 @@
+import { ImplementationCandidateReview } from "./ImplementationCandidateReview";
+import { JudgeAmendmentReview } from "./JudgeAmendmentReview";
+import { AuthoringScopeReview } from "./AuthoringScopeReview";
 import {
   ArrowLeft,
   BookOpen,
@@ -12,6 +15,7 @@ import {
   Unlock,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { validateLockReason } from "./lockReason";
 
 import {
   answerLockRelease,
@@ -83,6 +87,8 @@ function RequirementCard({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
+  const reasonValidation = validateLockReason(reason);
+  const reasonHintId = "lock-reason-hint-" + requirement.id;
   const contractStatus = review?.status ?? requirement.execution_contract.status;
 
   // The boundary is read with the requirement, not behind the contract review.
@@ -112,10 +118,11 @@ function RequirementCard({
   }
 
   async function askForRelease() {
+    if (!reasonValidation.valid || acting) return;
     try {
       setActing(true);
       setError(null);
-      setLock(await askToLiftLock(specificationId, requirement.id, reason));
+      setLock(await askToLiftLock(specificationId, requirement.id, reasonValidation.normalized));
       setReason("");
       setMessage("Your request was recorded. The boundary holds until the other side answers.");
     } catch (failure) {
@@ -126,10 +133,11 @@ function RequirementCard({
   }
 
   async function answerRelease(decision: "grant" | "refuse") {
+    if (acting || !(decision === "grant" ? reasonValidation.commentValid : reasonValidation.valid)) return;
     try {
       setActing(true);
       setError(null);
-      setLock(await answerLockRelease(specificationId, requirement.id, decision, reason));
+      setLock(await answerLockRelease(specificationId, requirement.id, decision, reasonValidation.normalized));
       setReason("");
       setMessage(decision === "grant" ? "You agreed to lift this boundary." : "You refused, and your reason was recorded.");
       await onChanged();
@@ -272,26 +280,32 @@ function RequirementCard({
         <div className="oi-lock-action">
           {lock.state === "locked" ? <>
             <label htmlFor={"lock-reason-" + requirement.id}>Why should this boundary be lifted?</label>
-            <textarea id={"lock-reason-" + requirement.id} disabled={acting} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} placeholder="The tests and scope stop being the right ones because..." />
-            <button className="oi-button oi-button-secondary" type="button" disabled={acting || reason.trim().length < 8} onClick={() => void askForRelease()}>{acting ? <LoaderCircle className="spin" size={15} /> : <Unlock size={15} />}Ask to lift this</button>
+            <textarea id={"lock-reason-" + requirement.id} aria-describedby={reasonHintId} aria-invalid={reason.length > 0 && !reasonValidation.valid} disabled={acting} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} placeholder="The tests and scope stop being the right ones because..." />
+            <p id={reasonHintId} role="status" aria-live="polite">{reasonValidation.hint}</p>
+            <button className="oi-button oi-button-secondary" type="button" disabled={acting || !reasonValidation.valid} onClick={() => void askForRelease()}>{acting ? <LoaderCircle className="spin" size={15} /> : <Unlock size={15} />}Ask to lift this</button>
           </> : null}
           {lock.state === "awaiting_answer" ? <>
-            <label htmlFor={"lock-answer-" + requirement.id}>Your answer, and why</label>
-            <textarea id={"lock-answer-" + requirement.id} disabled={acting} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} placeholder="Agreed, because... / Not yet, because..." />
+            <label htmlFor={"lock-answer-" + requirement.id}>Comment (optional when agreeing)</label>
+            <textarea id={"lock-answer-" + requirement.id} aria-describedby={reasonHintId} aria-invalid={!reasonValidation.commentValid} disabled={acting} value={reason} onChange={(event) => setReason(event.target.value)} rows={2} placeholder="If refusing, explain why..." />
+            <p id={reasonHintId} role="status" aria-live="polite">{reasonValidation.commentValid ? "You can agree without a comment. Refusing requires a reason of 8–500 characters." : reasonValidation.hint}</p>
             <div className="oi-action-row">
-              <button className="oi-button oi-button-primary" type="button" disabled={acting || reason.trim().length < 8} onClick={() => void answerRelease("grant")}>{acting ? <LoaderCircle className="spin" size={15} /> : <Unlock size={15} />}Agree to lift it</button>
-              <button className="oi-button oi-button-secondary" type="button" disabled={acting || reason.trim().length < 8} onClick={() => void answerRelease("refuse")}><TriangleAlert size={15} />Refuse, with reason</button>
+              <button className="oi-button oi-button-primary" type="button" disabled={acting || !reasonValidation.commentValid} onClick={() => void answerRelease("grant")}>{acting ? <LoaderCircle className="spin" size={15} /> : <Unlock size={15} />}Agree to lift it</button>
+              <button className="oi-button oi-button-secondary" type="button" disabled={acting || !reasonValidation.valid} onClick={() => void answerRelease("refuse")}><TriangleAlert size={15} />Refuse, with reason</button>
             </div>
           </> : null}
         </div>
         {lock.exchanges.length ? <ol className="oi-lock-exchanges">
           {lock.exchanges.map((exchange, index) => <li key={index}>
             <div><strong>{exchange.asked_by} asked to lift this</strong><span>{exchange.reason}</span></div>
-            {exchange.answer ? <div className={exchange.answer === "grant" ? "is-granted" : "is-refused"}><strong>{exchange.answered_by} {exchange.answer === "grant" ? "agreed" : "refused"}</strong><span>{exchange.answer_reason}</span></div> : <div className="is-waiting"><strong>Waiting for the other side</strong><span>The boundary still holds until they answer.</span></div>}
+            {exchange.answer ? <div className={exchange.answer === "grant" ? "is-granted" : "is-refused"}><strong>{exchange.answered_by} {exchange.answer === "grant" ? "agreed" : "refused"}</strong>{exchange.answer_reason ? <span>{exchange.answer_reason}</span> : null}</div> : <div className="is-waiting"><strong>Waiting for the other side</strong><span>The boundary still holds until they answer.</span></div>}
             {exchange.one_sided ? <span className="oi-lock-one-sided">Recorded as one-sided: this workspace has a single user, so nobody else consented.</span> : null}
           </li>)}
         </ol> : null}
       </section> : null}
+
+      <JudgeAmendmentReview key={specificationId + "#" + requirement.id} specId={specificationId} requirementId={requirement.id} />
+      {lock?.state === "released" ? <AuthoringScopeReview specId={specificationId} requirementId={requirement.id} /> : null}
+      {lock?.state === "released" ? <ImplementationCandidateReview specId={specificationId} requirementId={requirement.id} /> : null}
 
       {message ? <div className="oi-alert is-good">{message}</div> : null}
       {error ? <div className="oi-alert is-error" role="alert"><TriangleAlert size={15} />{error}</div> : null}

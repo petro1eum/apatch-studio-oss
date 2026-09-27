@@ -695,6 +695,34 @@ class SddWorkflowFacade:
         return spec_id, requirement_id
 
     def _prepared_path(self, spec_id: str) -> Path:
+        # A promoted candidate is selected by the sealed active Core contract,
+        # never by a caller-provided pointer or by overwriting the original draft.
+        try:
+            active = read_json(self.root / ".apatch/sdd_verification_contract.json", limit=_MAX_PREPARED_BYTES)
+        except FileNotFoundError:
+            active = None
+        except (OSError, ValueError) as exc:
+            raise SddWorkflowError("The active contract is unavailable", code="sdd_contract_invalid") from exc
+        if isinstance(active, Mapping) and active.get("candidate_path"):
+            relative = str(active["candidate_path"])
+            if (active.get("schema") != "apatch.sdd.verification-contract.v1"
+                    or active.get("status") != "frozen"
+                    or active.get("document_hash") != _core().canonical_hash({key: value for key, value in active.items() if key != "document_hash"})
+                    or not relative.startswith(".apatch/sdd/prepared/")
+                    or ".." in Path(relative).parts or Path(relative).is_absolute()):
+                raise SddWorkflowError("The successor candidate binding is invalid", code="sdd_contract_tampered")
+            path = self.root / relative
+            try:
+                with StateDirectory(path.parent) as directory:
+                    data = directory.read_bytes(path.name, limit=_MAX_PREPARED_BYTES)
+                import json
+                package = json.loads(data)
+                if "sha256:" + hashlib.sha256(data).hexdigest() != active.get("candidate_hash"):
+                    raise ValueError("candidate bytes changed")
+                if package.get("spec_id") == spec_id:
+                    return path
+            except (OSError, ValueError, AttributeError) as exc:
+                raise SddWorkflowError("The approved successor candidate changed", code="sdd_contract_tampered") from exc
         return self.root / ".apatch" / "sdd" / "prepared" / f"{spec_id}.json"
 
     def _envelope_path(self, spec_id: str, requirement_id: str) -> Path:
@@ -836,9 +864,28 @@ class SddWorkflowFacade:
             try:
                 binding = self.execution_binding(spec_id, requirement_id, actor_id="agent:review")
             except SddWorkflowError:
+                if self._prepared_path(spec_id) != self.root / ".apatch/sdd/prepared" / f"{spec_id}.json":
+                    raise
                 pass
             else:
                 contract = binding["contract"]
+                if contract.get("candidate_path"):
+                    # Core already froze the selected candidate while retaining
+                    # predecessor obligations. Rewriting every approver here
+                    # would erase that lineage and manufacture a false drift.
+                    pins = {asset["path"] for item in contract.get("obligations", []) for asset in item.get("judge_assets", [])}
+                    expected = _core().validate_task_envelope({
+                        **prepared_envelope, "contract_hash": contract["document_hash"],
+                        "forbidden_paths": sorted(set(prepared_envelope.get("forbidden_paths", [])) | pins | {".apatch/**", ".trustchain/**", ".git/**"}),
+                    })
+                    if expected["document_hash"] != binding["envelope_hash"]:
+                        raise SddWorkflowError("The successor task envelope changed", code="sdd_approval_drift")
+                    return self._review_projection(
+                        package, contract, binding["task_envelope"], status="frozen",
+                        contract_hash=binding["contract_hash"], envelope_hash=binding["envelope_hash"],
+                        owner_actor_id=str((contract.get("authority") or {}).get("actor_id") or ""),
+                        frozen_at=str(contract.get("frozen_at") or ""),
+                    )
                 try:
                     candidate = _core().freeze_contract(self._freeze_input(
                         package, contract_request,
@@ -1102,6 +1149,24 @@ class SddWorkflowFacade:
         })
 
     def freeze_requirement(self, spec_id: str, requirement_id: str, *, owner_actor_id: str, confirmed: bool, expected_snapshot: str | None = None) -> dict[str, Any]:
+        try:
+            from apatch import sdd_draft_amendment as draft
+        except ImportError:
+            if (self.root / ".apatch/sdd/draft-amendments").exists():
+                raise SddWorkflowError("Install draft-repair-capable Core before freezing",
+                    code="sdd_draft_unavailable", status_code=503)
+            return self._freeze_requirement_unlocked(spec_id, requirement_id,
+                owner_actor_id=owner_actor_id, confirmed=confirmed, expected_snapshot=expected_snapshot)
+        try:
+            with draft.freeze_lock(self.root):
+                draft.assert_can_freeze(self.root)
+                return self._freeze_requirement_unlocked(spec_id, requirement_id,
+                    owner_actor_id=owner_actor_id, confirmed=confirmed, expected_snapshot=expected_snapshot)
+        except (ValueError, OSError) as exc:
+            raise SddWorkflowError("Complete or recover the pending draft repair before freezing",
+                code="sdd_draft_pending") from exc
+
+    def _freeze_requirement_unlocked(self, spec_id: str, requirement_id: str, *, owner_actor_id: str, confirmed: bool, expected_snapshot: str | None = None) -> dict[str, Any]:
         if confirmed is not True:
             raise SddWorkflowError("Owner confirmation is required", code="sdd_owner_confirmation_required", status_code=422)
         owner = _clean_text(owner_actor_id)

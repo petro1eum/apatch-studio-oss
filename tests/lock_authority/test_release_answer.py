@@ -205,7 +205,7 @@ def test_a_refused_request_stays_readable_after_the_next_one(tmp_path):
     client.post(
         ASK_URL,
         headers=headers,
-        json={**ASK, "reason": "asking again, the release note is written now"},
+        json={**ASK, "request_id": "apsreq_release_second", "reason": "asking again, the release note is written now"},
     )
 
     exchanges = client.get(LOOK, headers=headers).json()["exchanges"]
@@ -229,6 +229,32 @@ def test_a_consent_lifts_the_boundary_and_says_so(tmp_path):
     ).json()
     assert view["state"] == "released"
     assert view["exchanges"][-1]["answer"] == "grant"
+
+
+@pytest.mark.parametrize("comment", [None, "", "OK", "Agreed"])
+def test_grant_needs_no_explanation_and_replays_exactly(tmp_path, comment):
+    client, headers = _asked(tmp_path)
+    payload = {"request_id": "apsreq_answer_optional", "decision": "grant"}
+    if comment is not None:
+        payload["reason"] = comment
+    result = client.post(ANSWER_URL, headers=headers, json=payload)
+    assert result.status_code == 200
+    assert result.json()["state"] == "released"
+    exchange = result.json()["exchanges"][-1]
+    assert exchange["answer_reason"] == (comment or "")
+    assert exchange["answered_by"] == "studio-laptop"
+    assert client.post(ANSWER_URL, headers=headers, json=payload).json() == result.json()
+    changed = client.post(ANSWER_URL, headers=headers, json={**payload, "reason": "changed"})
+    assert changed.status_code != 200
+
+
+def test_refusal_still_requires_an_explanation(tmp_path):
+    client, headers = _asked(tmp_path)
+    result = client.post(ANSWER_URL, headers=headers, json={
+        "request_id": "apsreq_answer_empty_refusal", "decision": "refuse",
+    })
+    assert result.status_code == 422
+    assert client.get(LOOK, headers=headers).json()["state"] == "awaiting_answer"
 
 
 def test_an_answer_carries_no_name_and_no_third_decision(tmp_path):

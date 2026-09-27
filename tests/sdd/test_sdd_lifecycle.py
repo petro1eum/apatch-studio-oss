@@ -300,7 +300,109 @@ def test_effort_is_rederived_and_not_accepted_time(facade) -> None:
     assert effort["quality"] == "estimated"
 
 
-def test_amendment_invalidates_only_affected_work(facade) -> None:
+
+def _assert_judge_amendment_authoring_lineage(tmp_path, monkeypatch, corruption):
+    """Actual Ed25519 transition evidence, never signature-presence fixtures."""
+    import copy
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
+    from apatch.sdd_integrity import _seal
+    from apatch.trustchain_helper import TrustChainHelper
+    from apatch_studio.authoring_workflow import AuthoringWorkflow
+    key = tmp_path / "test-key.pem"
+    key.write_bytes(Ed25519PrivateKey.generate().private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+    monkeypatch.setenv("APATCH_AGENT_ID", "lineage-test")
+    monkeypatch.setenv("APATCH_AGENT_KEY", str(key))
+    original_hash, grant = "sha256:" + "1"*64, "sha256:" + "2"*64
+    parent = _seal({"schema":"apatch.sdd.verification-contract.v1", "status":"frozen",
+        "implementation_allowed":True, "authority":{"actor_id":"owner","role":"authority"},
+        "authoring_grant_hash":grant, "supersedes_hash":original_hash})
+    details = {"supersedes_hash":parent["document_hash"], "judge_path":"tests/check.py",
+               "old_judge_hash":"sha256:"+"3"*64, "new_judge_hash":"sha256:"+"4"*64}
+    child = _seal({**parent, "supersedes_hash":parent["document_hash"], "judge_amendment":details})
+    proposal = {"grant_hash":grant, "scope":{"contract_hash":original_hash}}
+    review_data = {"schema":"apatch.sdd.judge-amendment-review.v1", "authority_id":"owner",
+        "previous_contract":parent, "new_contract":child, "contract_hash":parent["document_hash"]}
+    shared = isinstance(corruption, str) and corruption.startswith("shared_")
+    if shared:
+        review_data.update(affected_requirement_refs=["SPEC-DEMO#R1", "SPEC-DEMO#R2"],
+            invalidated_acceptance_ids=["AC-1", "AC-2"],
+            invalidated_checks_by_requirement={"SPEC-DEMO#R1": ["AC-1"], "SPEC-DEMO#R2": ["AC-2"]})
+    review = _seal(review_data)
+    result = {"contract":child, "contract_hash":child["document_hash"]}
+    receipt = _seal({"review_hash":review["document_hash"], "result":result})
+    root = tmp_path
+    def put(relative, value):
+        path = root / relative; path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value)); return path
+    active = put(".apatch/sdd_verification_contract.json", child)
+    parent_path = put(".apatch/sdd/frozen/"+parent["document_hash"][7:]+".json", parent)
+    put(".apatch/sdd/frozen/"+child["document_hash"][7:]+".json", child)
+    folder = ".apatch/sdd/judge-amendments/"+review["document_hash"][7:]
+    review_path = put(folder+"/review.json", review)
+    receipt_path = put(folder+"/receipt.json", receipt)
+    tc = TrustChainHelper(str(root), auto_init=True)
+    proof = {"schema":"apatch.sdd.judge-amendment-activation.v1", "stage":"activated",
+        "amendment_id":review["document_hash"], "authority_id":"owner",
+        "contract_hash":child["document_hash"], "previous_contract_hash":parent["document_hash"],
+        "judge_path":details["judge_path"], "old_judge_hash":details["old_judge_hash"],
+        "new_judge_hash":details["new_judge_hash"]}
+    if shared:
+        for ref in review["affected_requirement_refs"]:
+            item = {**proof, "requirement_ref": ref, "affected_requirement_refs": [ref],
+                "affected_requirements": [ref.split("#")[1]],
+                "invalidated_acceptance_ids": review["invalidated_checks_by_requirement"][ref],
+                "invalidated_checks_by_requirement": review["invalidated_checks_by_requirement"],
+                "review_invalidated_acceptance_ids": review["invalidated_acceptance_ids"],
+                "review_affected_requirement_refs": review["affected_requirement_refs"],
+                "functional_acceptance": False}
+            if corruption == "shared_missing" and ref.endswith("R2"):
+                continue
+            if corruption == "shared_wrong_checks" and ref.endswith("R2"):
+                item["invalidated_acceptance_ids"] = ["AC-1"]
+            if corruption == "shared_wrong_owner" and ref.endswith("R2"):
+                item["authority_id"] = "other"
+            assert tc.commit_action("apatch_sdd_judge_amendment", item)
+            if corruption == "shared_duplicate_conflict" and ref.endswith("R2"):
+                assert tc.commit_action("apatch_sdd_judge_amendment", {**item, "new_judge_hash": "sha256:"+"a"*64})
+    else:
+        assert tc.commit_action("apatch_sdd_judge_amendment", proof)
+    if corruption == "missing_receipt":
+        receipt_path.unlink()
+    elif corruption == "wrong_grant":
+        proposal["grant_hash"] = "sha256:" + "f"*64
+    elif corruption == "wrong_review":
+        wrong = copy.deepcopy(review); wrong["authority_id"]="other"
+        wrong.pop("document_hash"); review_path.write_text(json.dumps(_seal(wrong)))
+    elif corruption == "bad_seal":
+        changed=copy.deepcopy(child);changed["authority"]["actor_id"]="other"
+        active.write_text(json.dumps(changed))
+    elif corruption == "cycle":
+        cyclic=copy.deepcopy(parent);cyclic["supersedes_hash"]=child["document_hash"]
+        parent_path.write_text(json.dumps(cyclic))
+    elif corruption == "missing_parent":
+        parent_path.unlink()
+    elif corruption == "bad_signature":
+        for row in tc.iter_ledger_entries():
+            if row["tool_id"] == "apatch_sdd_judge_amendment":
+                path=root/".trustchain"/row["object_path"];raw=json.loads(path.read_text())
+                raw["value"]["data"]["authority_id"]="forged";path.write_text(json.dumps(raw))
+    if corruption in (None, "shared_valid"):
+        assert AuthoringWorkflow(root)._activated_successor_of(proposal) is True
+    else:
+        try:
+            allowed = AuthoringWorkflow(root)._activated_successor_of(proposal)
+        except (ValueError, OSError):
+            allowed = False
+        assert allowed is False
+
+@pytest.mark.parametrize("corruption", [None, "missing_receipt", "wrong_grant", "wrong_review", "bad_seal", "cycle", "missing_parent", "bad_signature", "shared_valid", "shared_missing", "shared_wrong_checks", "shared_wrong_owner", "shared_duplicate_conflict", "shared_roundtrip"])
+def test_amendment_invalidates_only_affected_work(facade, tmp_path, monkeypatch, corruption) -> None:
+    if corruption == "shared_roundtrip":
+        from tests.authoring.test_shared_authoring_roundtrip import test_shared_amendment_then_next_signed_authoring_and_successor
+        test_shared_amendment_then_next_signed_authoring_and_successor(tmp_path, monkeypatch)
+    else:
+        _assert_judge_amendment_authoring_lineage(tmp_path, monkeypatch, corruption)
     view, _ = facade
     amendment = view.propose_amendment({
         "contract_hash": "sha256:" + "2" * 64,
@@ -319,3 +421,4 @@ def test_oss_and_cowork_share_integrity_floor(facade) -> None:
     cowork = module.integrity_floor("cowork")
     assert oss == cowork
     assert {"strict_envelope", "locked_judge", "meaningful_verification", "falsification"} <= set(oss)
+

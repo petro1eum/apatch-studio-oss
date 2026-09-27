@@ -1,3 +1,7 @@
+import type { DraftRepair } from "./DraftRepairReview";
+import type { ImplementationReview } from "./ImplementationCandidateReview";
+import type { JudgeReview } from "./JudgeAmendmentReview";
+import type { AuthoringReview } from "./AuthoringScopeReview";
 import type {
   ActionReceipt,
   AgentRun,
@@ -73,6 +77,15 @@ export const loadRunners = async () =>
   (await request<{ items: RunnerInfo[] }>("/api/v1/runners")).items;
 
 export const loadRuns = () => request<AgentRunsPage>("/api/v1/runs");
+
+const draftRepairPath = (runId: string) => "/api/v1/runs/" + encodeURIComponent(runId) + "/draft-amendment";
+export const loadDraftRepair = (runId: string) => request<DraftRepair>(draftRepairPath(runId));
+export const proposeDraftRepair = (runId: string, reason: string, files: Array<{ path: string; content: string }>) =>
+  request<DraftRepair>(draftRepairPath(runId), { method: "POST",
+    body: JSON.stringify({ request_id: actionRequestId("draft_prepare"), reason, files }) });
+export const approveDraftRepair = (runId: string, snapshot: string) =>
+  request<{ ok: boolean; functional_acceptance: false }>(draftRepairPath(runId) + "/approve", { method: "POST",
+    body: JSON.stringify({ request_id: actionRequestId("draft_approve"), confirmed: true, snapshot }) });
 
 export const loadChangeFeed = () => request<ChangeFeedPage>("/api/v1/changes");
 
@@ -387,3 +400,24 @@ export const cancelExecutionIntent = (intentId: string) =>
     "/api/v1/execution-intents/" + encodeURIComponent(intentId) + "/cancel",
     { method: "POST" },
   );
+
+export const loadAuthoringScope = (specId: string, requirementId: string) =>
+  request<AuthoringReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/authoring");
+export const approveAuthoringScope = (specId: string, requirementId: string, snapshot: string) =>
+  request<AuthoringReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/authoring/approve", {
+    method: "POST", body: JSON.stringify({ request_id: "apsreq_" + crypto.randomUUID().replaceAll("-", ""), confirmed: true, snapshot }),
+  });
+
+export const loadJudgeAmendment = (specId: string, requirementId: string) =>
+  request<JudgeReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/judge-amendment");
+export const approveJudgeAmendment = (specId: string, requirementId: string, snapshot: string) =>
+  request<JudgeReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/judge-amendment/approve", {
+    method: "POST", body: JSON.stringify({ request_id: "apsreq_" + crypto.randomUUID().replaceAll("-", ""), confirmed: true, snapshot }),
+  });
+
+export const loadImplementationCandidate = (specId: string, requirementId: string) =>
+  request<ImplementationReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/implementation-candidate");
+export const approveImplementationCandidate = (specId: string, requirementId: string, snapshot: string) =>
+  request<ImplementationReview>("/api/v1/specs/" + encodeURIComponent(specId) + "/requirements/" + encodeURIComponent(requirementId) + "/implementation-candidate/approve", {
+    method: "POST", body: JSON.stringify({ request_id: "apsreq_" + crypto.randomUUID().replaceAll("-", ""), confirmed: true, snapshot }),
+  });

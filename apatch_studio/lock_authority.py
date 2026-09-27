@@ -59,11 +59,11 @@ def _reference(value: Any, label: str) -> str:
     return text
 
 
-def _reason(value: Any) -> str:
+def _reason(value: Any, *, optional: bool = False) -> str:
     """Why this is being asked, in words somebody else can weigh."""
 
     text = " ".join(str(value or "").split())
-    if not MIN_REASON <= len(text) <= MAX_REASON:
+    if not (0 if optional else MIN_REASON) <= len(text) <= MAX_REASON:
         raise LockAuthorityError(
             f"a reason of {MIN_REASON} to {MAX_REASON} characters is required; "
             "the other side has to be able to weigh it"
@@ -346,7 +346,7 @@ class LockAuthority:
             if item.get("request_id") != request_id:
                 continue
             actor = item.get("asked_by") if decision is None else item.get("by")
-            if (not _same_party(person, actor or {}) or item.get("reason") != _reason(reason)
+            if (not _same_party(person, actor or {}) or item.get("reason") != _reason(reason, optional=decision == "grant")
                     or (decision is not None and item.get("decision") != decision)):
                 raise LockAuthorityError("A release request identifier cannot be reused with different details.")
             return True
@@ -411,10 +411,10 @@ class LockAuthority:
         *,
         answered_by: Any = None,
         decision: str,
-        reason: str,
+        reason: str = "",
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        """Consent or refuse, and say why either way.
+        """Consent with an optional comment, or refuse with a reason.
 
         A refusal is kept as fully as a consent. If refusals were dropped, a
         request that was made and denied would be indistinguishable from one
@@ -448,7 +448,8 @@ class LockAuthority:
             **({"request_id": request_id} if request_id is not None else {}),
             "by": answerer,
             "decision": decision,
-            "reason": _reason(reason),
+            "reason": _reason(reason, optional=decision == "grant"),
+            **({"release_request_id": release["request_id"]} if release.get("request_id") else {}),
             "at": _instant(self.clock),
         }
         record["release"] = release
@@ -536,7 +537,7 @@ class LockAuthority:
         answer = release["answer"]
         return amend_contract(
             contract,
-            reason=answer["reason"],
+            reason=answer["reason"] or release["reason"],
             authority={"actor_id": answer["by"]["id"], "role": "authority"},
             changed_acceptance_ids=[str(item) for item in changed_acceptance_ids or []],
             affected_requirements=affected,

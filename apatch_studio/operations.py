@@ -26,6 +26,15 @@ _HASH_ID = r"^sha256:[0-9a-f]{64}$"
 _REQUEST_ID = r"^apsreq_[a-z0-9][a-z0-9_-]{7,95}$"
 
 
+def _normalize_lock_reason(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = " ".join(value.split())
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ValueError("a reason must be plain text")
+    return text
+
+
 class ExecutionContext(BaseModel):
     """Signed external source context accepted only by Studio internals."""
 
@@ -122,6 +131,11 @@ class LockReleaseRequest(BaseModel):
     request_id: str = Field(pattern=_REQUEST_ID)
     reason: str = Field(min_length=8, max_length=500)
 
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_reason(cls, value: Any) -> Any:
+        return _normalize_lock_reason(value)
+
 
 class LockReleaseAnswer(BaseModel):
     """The other side's answer, which is a consent or a reasoned refusal."""
@@ -130,7 +144,18 @@ class LockReleaseAnswer(BaseModel):
 
     request_id: str = Field(pattern=_REQUEST_ID)
     decision: Literal["grant", "refuse"]
-    reason: str = Field(min_length=8, max_length=500)
+    reason: str = Field(default="", max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalize_reason(cls, value: Any) -> Any:
+        return _normalize_lock_reason(value)
+
+    @model_validator(mode="after")
+    def refusal_requires_reason(self) -> Self:
+        if self.decision == "refuse" and len(self.reason) < 8:
+            raise ValueError("a refusal requires a reason of 8 to 500 characters")
+        return self
 
 
 class AgentRunRequest(BaseModel):

@@ -149,7 +149,16 @@ Studio reuses APatch signed-event timesheet derivation, exposes method and quali
 
 ## R19 Explicit amendment and exact invalidation
 
-A signed amendment preserves the superseded revision and reason, changes exact hashes and invalidates only affected capabilities, requirements and attestations.
+For this requirement only, an owner-approved external capability prerequisite may
+satisfy the Core dependency: SPEC-SDD-INTEGRITY-1#R10 from the registered workspace
+@apatch-dev, with an exact signed completion artifact, source hashes and successful
+bound verification. The runtime must support and validate this prerequisite before
+any session admission or mutation. A missing, stale, unsigned or mismatched record
+is denied. This exception applies only to SPEC-STUDIO-SDD-LIFECYCLE-1#R19 and only
+to the reviewed judge-amendment capability. Every other Studio requirement retains
+the original whole-Core dependency. This text alone does not authorize an exception.
+
+A signed amendment preserves the superseded revision and reason, changes exact hashes and invalidates only affected capabilities, requirements and attestations. Shared-judge activation is accepted only when its complete signed per-requirement projections exactly match the immutable owner review and receipt; subsequent authoring preserves that verified lineage.
 
 (verify: python3 -m pytest tests/sdd/test_sdd_lifecycle.py::test_amendment_invalidates_only_affected_work -q)
 

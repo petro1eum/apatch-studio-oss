@@ -76,6 +76,25 @@ def _granted(root):
     return authority
 
 
+def test_empty_consent_uses_original_request_basis_for_amendment(tmp_path):
+    authority = LockAuthority(tmp_path)
+    authority.lock_team(SPEC, "R2", set_by=MANAGER, taken_by=TAKER)
+    basis = "the frozen test contradicts the agreed scope"
+    authority.request_release(SPEC, "R2", asked_by=TAKER, reason=basis, request_id="ask-original")
+    record = authority.answer_release(SPEC, "R2", answered_by=MANAGER, decision="grant", request_id="answer-original")
+    assert record["release"]["answer"]["reason"] == ""
+    assert record["release"]["answer"]["release_request_id"] == "ask-original"
+    assert record["release"]["answer"]["at"]
+    contract = _contract()
+    amendment = authority.amendment_for_release(
+        SPEC, "R2", contract=contract, changed_acceptance_ids=["AC-2"],
+        affected_requirements=["R2"], all_requirements=ALL,
+    )
+    assert amendment["reason"] == basis
+    assert amendment["supersedes_hash"] == contract["document_hash"]
+    assert amendment["authority"]["actor_id"] == "rita@example.test"
+
+
 def test_only_the_requirement_that_moved_is_invalidated(tmp_path):
     authority = _granted(tmp_path)
 

@@ -29,6 +29,7 @@ import {
   recordTimeDecision,
 } from "./api";
 import { ChangeCard } from "./OutsideInViews";
+import { DraftRepairReview } from "./DraftRepairReview";
 import type { ConfirmRequest } from "./OutsideInViews";
 import type {
   ChangeFeedItem,
@@ -618,6 +619,7 @@ export function ChangeDetailView({
           recordedBy={run.work_ref.governed_session_id ? "APatch governed session" : "Studio run journal"}
         />
         <DecisionBasisSection basis={runBasis} onOpenDocument={onOpenDocument} />
+        {run.mode === "new_change" && run.can_retry ? <DraftRepairReview runId={run.run_id} onChanged={onChanged} /> : null}
         <ChangeCard
           run={run}
           expanded
