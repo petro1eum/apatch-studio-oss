@@ -874,8 +874,20 @@ class SddWorkflowFacade:
                     # predecessor obligations. Rewriting every approver here
                     # would erase that lineage and manufacture a false drift.
                     pins = {asset["path"] for item in contract.get("obligations", []) for asset in item.get("judge_assets", [])}
+                    # A signed owner amendment may correct only duplicate pytest
+                    # conftest loading. The original immutable preparation remains
+                    # history; no scope, checks, tests or arbitrary argv are relaxed.
+                    bootstrap = (contract.get("judge_amendment") or {}).get("bootstrap")
+                    expected_commands = prepared_envelope.get("commands", [])
+                    if bootstrap:
+                        old, new = bootstrap.get("old_command"), bootstrap.get("new_command")
+                        if (bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap"
+                            or not isinstance(old, list) or new != [*old, "--noconftest"]
+                            or contract.get("spec_hash") != bootstrap.get("new_spec_hash")):
+                            raise SddWorkflowError("The owner bootstrap amendment is invalid", code="sdd_approval_drift")
+                        expected_commands = [new if command == old else command for command in expected_commands]
                     expected = _core().validate_task_envelope({
-                        **prepared_envelope, "contract_hash": contract["document_hash"],
+                        **prepared_envelope, "commands": expected_commands, "contract_hash": contract["document_hash"],
                         "forbidden_paths": sorted(set(prepared_envelope.get("forbidden_paths", [])) | pins | {".apatch/**", ".trustchain/**", ".git/**"}),
                     })
                     if expected["document_hash"] != binding["envelope_hash"]:

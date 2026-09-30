@@ -6,7 +6,7 @@ from apatch.runtime.atomic_io import exclusive_file_lock
 from apatch.sdd_integrity import canonical_hash
 from apatch.sdd_successor import _immutable
 from apatch_studio.state_io import check_target
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from apatch_studio.sdd_workflow import SddWorkflowError
 from apatch_studio.state_io import read_json, write_json
 
@@ -17,6 +17,7 @@ class JudgeAmendmentRequest(BaseModel):
     judge_path: str = Field(min_length=1, max_length=512)
     replacement_text: str = Field(min_length=1, max_length=1048576)
     reason: str = Field(min_length=1, max_length=8192)
+    disable_pytest_conftest_autoload: StrictBool = False
 
 def amendment_core():
     try:
@@ -79,7 +80,7 @@ class JudgeAmendmentWorkflow:
         with self._guard():
             try:
                 fingerprint = canonical_hash({"spec_id": spec_id, "requirement_id": requirement_id,
-                                               "request": request.model_dump()})
+                                               "request": request.model_dump(exclude_defaults=True)})
                 request_path = self._request_path(request.request_id)
                 try:
                     recorded = read_json(request_path, limit=8388608)
@@ -97,9 +98,16 @@ class JudgeAmendmentWorkflow:
                                                code="sdd_request_conflict")
                     self._persist_request(request_path, fingerprint, previous)
                     return previous
-                review = amendment_core().prepare_judge_amendment(
+                core = amendment_core()
+                options = {}
+                if request.disable_pytest_conftest_autoload:
+                    if getattr(core, "PYTEST_BOOTSTRAP_AMENDMENT", False) is not True:
+                        raise SddWorkflowError("Installed Core cannot review this exact pytest bootstrap correction.",
+                                               code="sdd_pytest_bootstrap_unavailable", status_code=503)
+                    options["disable_pytest_conftest_autoload"] = True
+                review = core.prepare_judge_amendment(
                     self.root, spec_id=spec_id, requirement_id=requirement_id, acceptance_id=request.acceptance_id,
-                    judge_path=request.judge_path, replacement_text=request.replacement_text, reason=request.reason)
+                    judge_path=request.judge_path, replacement_text=request.replacement_text, reason=request.reason, **options)
                 if (review.get("spec_id") != spec_id or review.get("requirement_id") != requirement_id
                     or review.get("functional_acceptance") is not False):
                     raise ValueError("Core returned an amendment for another scope")
