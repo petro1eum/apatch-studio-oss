@@ -18,6 +18,46 @@ MAX_PROJECTION_KEY_LENGTH = 96
 MAX_PROJECTION_STRING_LENGTH = 4096
 
 
+def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate a private binding without exposing its hash-pinned SPEC archives.
+
+    This view is only for the internal binding/journal guards, never an API
+    response. The exact sealed documents remain unchanged for Core execution.
+    Public projections still use assert_projection_safe without exceptions.
+    """
+    import copy
+    import hashlib
+
+    view = copy.deepcopy(dict(value))
+    contract = view.get("contract")
+    if not isinstance(contract, Mapping):
+        return view
+    amendment = contract.get("judge_amendment")
+    bootstrap = amendment.get("bootstrap") if isinstance(amendment, Mapping) else None
+    if not isinstance(bootstrap, Mapping) or bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap":
+        return view
+    try:
+        from apatch.sdd_integrity import issue_capability
+        issue_capability(
+            contract, view["task_envelope"],
+            actor_id=view["actor_id"], role="implementation",
+        )
+    except (ImportError, KeyError, RuntimeError, ValueError) as exc:
+        raise UnsafeProjectionError("invalid private SDD archive binding") from exc
+    for field, pin in (
+        ("old_spec_text", "old_spec_hash"),
+        ("replacement_spec_text", "new_spec_hash"),
+    ):
+        text = bootstrap.get(field)
+        if not isinstance(text, str) or len(text) > 1_048_576:
+            raise UnsafeProjectionError("invalid private SPEC archive size")
+        digest = "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if bootstrap.get(pin) != digest:
+            raise UnsafeProjectionError("private SPEC archive hash mismatch")
+        bootstrap[field] = {"hash": digest, "characters": len(text)}
+    return view
+
+
 class UnsafeProjectionError(ValueError):
     pass
 

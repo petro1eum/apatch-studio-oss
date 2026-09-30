@@ -15,7 +15,15 @@ from pathlib import Path
 from typing import Any, BinaryIO, Iterator
 
 from apatch_studio.operations import ExecutionContext, SddExecutionContext
-from apatch_studio.projection import UnsafeProjectionError, assert_projection_safe
+from apatch_studio.projection import (
+    UnsafeProjectionError, assert_projection_safe, private_sdd_projection,
+)
+
+
+def _private_record_projection(record: dict[str, Any]) -> dict[str, Any]:
+    if record.get("sdd_execution") is None:
+        return record
+    return {**record, "sdd_execution": private_sdd_projection(record["sdd_execution"])}
 
 try:
     import fcntl
@@ -247,7 +255,9 @@ class RunStore:
             "records": accepted,
         }
         try:
-            assert_projection_safe(document)
+            assert_projection_safe({
+                **document, "records": [_private_record_projection(record) for record in accepted],
+            })
         except UnsafeProjectionError as exc:
             raise RunJournalError(str(exc)) from exc
         payload = json.dumps(
@@ -434,7 +444,7 @@ class RunStore:
             if len(set(areas)) != len(areas) or not set(areas).issubset(_SCOPE_AREAS):
                 raise RunJournalError("run scope logical areas are invalid")
         try:
-            assert_projection_safe(record)
+            assert_projection_safe(_private_record_projection(record))
         except UnsafeProjectionError as exc:
             raise RunJournalError(str(exc)) from exc
         try:

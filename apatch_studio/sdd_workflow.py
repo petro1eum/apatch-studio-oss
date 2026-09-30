@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from apatch_studio.change_details import change_id_for_session
-from apatch_studio.projection import assert_projection_safe
+from apatch_studio.projection import assert_projection_safe, private_sdd_projection
 from apatch_studio.state_io import StateDirectory, check_target, read_json, write_json
 
 _REQUIRED_PERSPECTIVES = frozenset({"positive", "negative", "boundary", "regression"})
@@ -1274,7 +1274,7 @@ class SddWorkflowFacade:
             "contract": contract,
             "task_envelope": task_envelope,
         }
-        assert_projection_safe(result)
+        assert_projection_safe(private_sdd_projection(result))
         return result
 
     @staticmethod
