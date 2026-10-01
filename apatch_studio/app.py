@@ -83,6 +83,7 @@ from apatch_studio.authoring_workflow import AuthoringWorkflow, AuthoringProposa
 from apatch_studio.candidate_workflow import CandidateWorkflow
 from apatch_studio.judge_amendment_workflow import JudgeAmendmentWorkflow, JudgeAmendmentRequest
 from apatch_studio.document_publication_workflow import install_routes as install_document_publication_routes
+from apatch_studio.ownership_handoff_workflow import install_routes as install_ownership_handoff_routes
 
 
 def _frontend_root() -> Path:
@@ -729,6 +730,7 @@ def create_app(
             return runtime_intents.cancel(intent_id)
 
     install_document_publication_routes(app, workspace, identity_root=identity_root or default_state_root())
+    install_ownership_handoff_routes(app, workspace, identity_root=identity_root or default_state_root())
 
     assets = frontend / "assets"
     if assets.is_dir():
