@@ -82,6 +82,7 @@ from apatch_studio.draft_amendment_workflow import DraftAmendmentWorkflow, Draft
 from apatch_studio.authoring_workflow import AuthoringWorkflow, AuthoringProposalRequest, AuthoringApprovalRequest, ImplementationCandidateRequest
 from apatch_studio.candidate_workflow import CandidateWorkflow
 from apatch_studio.judge_amendment_workflow import JudgeAmendmentWorkflow, JudgeAmendmentRequest
+from apatch_studio.document_publication_workflow import install_routes as install_document_publication_routes
 
 
 def _frontend_root() -> Path:
@@ -499,7 +500,14 @@ def create_app(
         # The lock is recorded after the contract exists, never before. A lock
         # standing over a contract that was never frozen would read as a broken
         # lock, which is a far worse thing to say than nothing at all.
-        if not lock_authority.is_locked(spec_id, requirement_id):
+        # Resuming an exact historical agreement neither lifts nor re-locks its
+        # existing boundary. A granted release and its journal remain evidence.
+        historical_boundary = (
+            review.get("resumed_from_approval") == review.get("contract_hash")
+            and review.get("contract_hash") is not None
+            and lock_authority.read(spec_id, requirement_id) is not None
+        )
+        if not historical_boundary and not lock_authority.is_locked(spec_id, requirement_id):
             lock_authority.lock_solo(spec_id, requirement_id)
         return review
 
@@ -719,6 +727,8 @@ def create_app(
         @app.post("/api/v1/execution-intents/{intent_id}/cancel")
         def cancel_execution_intent(intent_id: str) -> dict[str, Any]:
             return runtime_intents.cancel(intent_id)
+
+    install_document_publication_routes(app, workspace, identity_root=identity_root or default_state_root())
 
     assets = frontend / "assets"
     if assets.is_dir():
