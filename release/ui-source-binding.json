@@ -1,0 +1,16 @@
+{
+  "schema": "apatch.studio.ui-source-binding.v1",
+  "version": "0.1.3",
+  "requirement": "SPEC-STUDIO-INTERACTIVE-CHANGE-1#R2",
+  "source_commit": "c02c2609e296551cf9434ff9701835be30008419",
+  "files": [
+    {
+      "path": "frontend/src/ChangeDetailView.tsx",
+      "sha256": "6a7b77d212b78d92a7c8ecc9ea133d59a27462e9c6269efd581dd991beb1ef56"
+    },
+    {
+      "path": "frontend/src/outside-in.css",
+      "sha256": "8ad063f9a44bbd336dd44b50cb0981c7f26e33aa1c44e4fd81e8bef7e78ef066"
+    }
+  ]
+}
