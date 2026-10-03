@@ -99,6 +99,17 @@ function humanTitle(value: string) {
   return withoutAnchor || "Verified project change";
 }
 
+function ChangeTitle({ title, original }: { title: string; original: string }) {
+  const longRequest = title.length > 120 || /[\r\n]/.test(original);
+  return <>
+    <h1>{longRequest ? "Change request" : title}</h1>
+    {longRequest ? <details className="oi-change-original-request">
+      <summary>Original request</summary>
+      <p className="oi-change-request-text">{original}</p>
+    </details> : null}
+  </>;
+}
+
 function runnerLabel(value: "codex" | "claude") {
   return value === "codex" ? "Codex" : "Claude Code";
 }
@@ -605,7 +616,7 @@ export function ChangeDetailView({
         <header className="oi-change-hero">
           <div>
             <span>Change</span>
-            <h1>{run.objective}</h1>
+            <ChangeTitle title={run.objective} original={run.objective} />
             <p>{formatDate(run.started_at ?? run.created_at)} · {run.message}</p>
           </div>
           <span className={"oi-badge tone-" + (run.status === "succeeded" ? "success" : run.can_retry ? "danger" : "info")}>
@@ -651,7 +662,7 @@ export function ChangeDetailView({
       <header className="oi-change-hero">
         <div>
           <span>{checkpoint ? "Verification checkpoint" : "Change"}</span>
-          <h1>{humanTitle(detail.objective)}</h1>
+          <ChangeTitle title={humanTitle(detail.objective)} original={detail.objective} />
           <p>{formatDate(detail.updated_at)} · {detail.result_message}</p>
         </div>
         <span className={"oi-badge tone-" + (proven ? "success" : "neutral")}>
