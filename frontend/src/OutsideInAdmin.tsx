@@ -97,7 +97,7 @@ function RuntimeAdmin({ data, requestConfirm, onChanged }: { data: WorkspaceOver
       <div className="oi-panel-heading"><div><span>Local runtime</span><strong>{data.runtime.apatch_version}</strong></div><Server size={20} /></div>
       <dl className="oi-key-values">
         <div><dt>Health</dt><dd>{data.runtime.hygiene}</dd></div>
-        <div><dt>Protection</dt><dd>{data.runtime.enforcement ? "Enforced" : "Audit"}</dd></div>
+        <div><dt>Protection</dt><dd>{!data.runtime.trust_mode || data.runtime.trust_mode === "unknown" ? "Not checked" : data.runtime.enforcement ? "Enforced" : "Audit"}</dd></div>
         <div><dt>Parallel work</dt><dd>{data.runtime.concurrent_writers ? "Available" : "Unavailable"}</dd></div>
         <div><dt>Agent tools</dt><dd>{data.runtime.tool_count}</dd></div>
         <div><dt>Machine identity</dt><dd>{data.runtime.endpoint_identity.headline}{data.runtime.endpoint_identity.enrolled ? "" : ". " + data.runtime.endpoint_identity.next_step}</dd></div>
