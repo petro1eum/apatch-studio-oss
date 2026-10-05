@@ -89,6 +89,23 @@ The historical 0.1.2 and 0.1.3 binding checks remain unchanged. Qualification mu
 also reject drift of each of the eight files and malformed or incomplete binding
 records; this candidate record does not establish artifact qualification.
 
+For version 0.1.5, the previous published version is 0.1.4. The candidate names
+the exact public-source commit for contract-intake preparation, its primary
+`apatch_studio/contract_intake_workflow.py` bytes and requirement
+`SPEC-STUDIO-CONTRACT-INTAKE-1#R5`. The exact three runtime files
+(`app.py`, `authoring_workflow.py`, `contract_intake_workflow.py`) are bound in
+`release/intake-source-binding.json`; they must match that same Git ancestor
+and current tree byte-for-byte. Metadata requires the compatible SDK dependency
+`apatch[mcp]>=0.8.50`. The prior 0.1.2, 0.1.3 and 0.1.4 requirements, source
+bindings and all historical judge functions/decorators remain unchanged.
+
+Twenty-seven additional candidate checks include two valid states, independent
+drift of each runtime file and twenty-two invalid identity, shape, version,
+publication or SDK-dependency cases. This is candidate-metadata qualification,
+not installed runtime acceptance, new UI, HOST admission or business acceptance.
+Actual wheel/sdist, installed application and publication stay under R2/R3/R9.
+No candidate or prepared test package is evidence of an upload.
+
 (verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py)
 
 ## Traceability
