@@ -83,18 +83,17 @@ class AuthoringWorkflow:
             if existing != proposal:
                 raise ValueError("immutable proposal history differs")
 
-    def _activated_successor_of(self, proposal):
+    def _activated_successor_of(self, proposal, *, contract=None, signed_rows=None):
         """Follow only archived, signed judge amendments of the approved wave."""
         from apatch.sdd_integrity import canonical_hash, _verify_seal, load_profile_contract
         from apatch.sdd_authoring import _path
-        from apatch.external_dependency import _signed_rows
-        contract = load_profile_contract(self.root)
+        contract = load_profile_contract(self.root) if contract is None else contract
         if contract is None:
             return False
         expected_grant = proposal.get("grant_hash")
         expected_parent = proposal.get("scope", {}).get("contract_hash")
         visited = set()
-        signed = None
+        signed = signed_rows
         for _ in range(32):
             digest = contract.get("document_hash")
             if (not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
@@ -120,6 +119,10 @@ class AuthoringWorkflow:
                 return False
             if signed is None:
                 # Reconstruct and verify Ed25519 bytes using this workspace's enrolled key.
+                try:
+                    from apatch.external_dependency import _signed_rows
+                except ImportError as exc:
+                    raise ValueError("Verified signed lineage reader is unavailable") from exc
                 signed = _signed_rows(self.root)
             candidates = [row["payload"] for row in signed
                 if row.get("tool_id") == "apatch_sdd_judge_amendment"
