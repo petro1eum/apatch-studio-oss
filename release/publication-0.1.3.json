@@ -1,0 +1,39 @@
+{
+  "schema": "apatch.studio.oss-publication.v1",
+  "version": "0.1.3",
+  "source_commit": "c02c2609e296551cf9434ff9701835be30008419",
+  "public_candidate_commit": "aac45827b87373d3a19e4624d8c6626076b9132e",
+  "artifacts": [
+    {
+      "filename": "apatch_studio-0.1.3-py3-none-any.whl",
+      "sha256": "e8fa7c42014bb56ad237550cc462ad3a06d976e3454860219531b196878624ef"
+    },
+    {
+      "filename": "apatch_studio-0.1.3.tar.gz",
+      "sha256": "1a4e7ba1a0f3cabf0a1d6aba0bf6565c6c16595a11fb7d6087a1b040e7350c75"
+    }
+  ],
+  "verification": [
+    {
+      "command": "npm --prefix frontend run build",
+      "result": "passed: TypeScript and Vite"
+    },
+    {
+      "command": "python -B -m pytest -q -p no:cacheprovider --ignore=tests/oss_publication/test_distribution_artifact.py --ignore=tests/oss_publication/test_release_evidence.py",
+      "result": "passed: 659 tests; native artifact assertions and exact-wheel client checks run separately"
+    },
+    {
+      "command": "python -I -m build --no-isolation --outdir dist",
+      "result": "passed: wheel and sdist from exact candidate commit"
+    },
+    {
+      "command": "python -I -m twine check dist/apatch_studio-0.1.3-py3-none-any.whl dist/apatch_studio-0.1.3.tar.gz",
+      "result": "passed: both archives"
+    },
+    {
+      "command": "python -I -B -c '\nimport hashlib, importlib.metadata as metadata, json, pathlib, sys, sysconfig\nfrom fastapi.testclient import TestClient\nimport apatch, apatch_studio\nfrom apatch_studio.app import create_app\nfrom apatch_studio.cli import _parser\nsite = pathlib.Path(sysconfig.get_path(\"purelib\")).resolve()\nfor module in (apatch, apatch_studio):\n    assert pathlib.Path(module.__file__).resolve().is_relative_to(site)\nassert apatch.__version__ == metadata.version(\"apatch\") == \"0.8.49\"\nassert apatch_studio.__version__ == metadata.version(\"apatch-studio\") == \"0.1.3\"\nweb = site / \"apatch_studio/_web\"\nassets = {\"/\" + path.relative_to(web).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in web.rglob(\"*\") if path.is_file() and path.name != \"index.html\"}\napp = create_app(sys.argv[1])\nwith TestClient(app, base_url=\"http://127.0.0.1:8765\") as client:\n    health = client.get(\"/api/v1/health\")\n    root = client.get(\"/\")\n    assert health.status_code == 200 and health.json()[\"version\"] == \"0.1.3\"\n    assert root.status_code == 200 and \"__APATCH_STUDIO_SESSION__\" not in root.text\n    assert next(route.path for route in app.routes if route.path == \"/assets\") == \"/assets\"\n    served = {}\n    for url, expected in assets.items():\n        response = client.get(url)\n        assert response.status_code == 200\n        actual = hashlib.sha256(response.content).hexdigest()\n        assert actual == expected, url\n        served[url] = actual\ncommands = set(_parser()._subparsers._group_actions[0].choices)\nassert commands == {\"serve\", \"name-this-machine\", \"enroll\"}\nprint(json.dumps({\"studio_version\": \"0.1.3\", \"sdk_version\": \"0.8.49\", \"wheel_imports\": {\"apatch\": apatch.__file__, \"apatch_studio\": apatch_studio.__file__}, \"commands\": sorted(commands), \"served_assets\": served, \"health_http\": 200, \"root_http\": 200}))\n' verification-workspace",
+      "result": "passed: isolated exact SDK 0.8.49 and Studio 0.1.3 wheel imports, HTTP health/root/assets, OSS CLI"
+    }
+  ],
+  "note": "Qualification used a physical offline Python environment containing the exact recorded wheels and audited existing dependencies, without system site-packages, pip, network dependency installation or CI. Commands use that environment Python and normalized relative paths; the final inline check ran against a disposable Git workspace. Native archive boundary assertions, all RECORD hashes and bundled frontend bytes were also verified. The historical 0.1.2 record is retained separately. This artifact qualification record does not claim a PyPI upload."
+}

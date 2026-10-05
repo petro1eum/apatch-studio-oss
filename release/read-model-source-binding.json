@@ -1,0 +1,40 @@
+{
+  "schema": "apatch.studio.read-model-source-binding.v1",
+  "version": "0.1.4",
+  "requirement": "SPEC-STUDIO-READ-INDEX-1#R1",
+  "source_commit": "75d2002ca6195bfcae1586eefcca3b1ce950948f",
+  "files": [
+    {
+      "path": "apatch_studio/adapter.py",
+      "sha256": "637627f728bb5b44e1d0bb8df9704d736375e22e32311111bb57e0708c288369"
+    },
+    {
+      "path": "apatch_studio/app.py",
+      "sha256": "81cd2e5b15bdcc04eb9c01100c647ae1aa39d204dabb4fbe43f5b9dff8cbbc42"
+    },
+    {
+      "path": "apatch_studio/read_index.py",
+      "sha256": "9666d104293738eeb01580ab32556f11b9874c64545689d7af10434eedf2bf68"
+    },
+    {
+      "path": "frontend/src/OutsideInAdmin.tsx",
+      "sha256": "44df5e60656fefbbb3959921f8fc693f6cb42d6f7f898869f18be083f1d941e8"
+    },
+    {
+      "path": "frontend/src/OutsideInApp.tsx",
+      "sha256": "75bc0a12efb642b877fac4a685ae576fb006434db1e5154500de0a531dde70c1"
+    },
+    {
+      "path": "frontend/src/OutsideInViews.tsx",
+      "sha256": "7527a9df026042a19b0d98cde52fff3e99faf8f65328073a8f1964e4cd436f84"
+    },
+    {
+      "path": "frontend/src/readModelVisibility.ts",
+      "sha256": "963e053b325ab0995b18c0c81340e3c3615db81ab6f15f2d32c1868f4af847a2"
+    },
+    {
+      "path": "frontend/src/types.ts",
+      "sha256": "3109c13aa2e1fd21e105abd40ddfc04abc7b59795adf5513985ce03316f55f1a"
+    }
+  ]
+}
