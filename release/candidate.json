@@ -1,9 +1,9 @@
 {
   "schema": "apatch.studio.oss-candidate.v1",
-  "version": "0.1.4",
-  "previous_published_version": "0.1.3",
-  "source_commit": "75d2002ca6195bfcae1586eefcca3b1ce950948f",
-  "source_file": "apatch_studio/read_index.py",
-  "source_file_sha256": "9666d104293738eeb01580ab32556f11b9874c64545689d7af10434eedf2bf68",
-  "requirement": "SPEC-STUDIO-READ-INDEX-1#R1"
+  "version": "0.1.5",
+  "previous_published_version": "0.1.4",
+  "source_commit": "f3c32bad0a5df3064584ed5574089a899f6ad373",
+  "source_file": "apatch_studio/contract_intake_workflow.py",
+  "source_file_sha256": "5dbb716f1cfd07f3262a8c0c57f60565beef7ad5fc9b5a3f239a29aad35fa92d",
+  "requirement": "SPEC-STUDIO-CONTRACT-INTAKE-1#R5"
 }

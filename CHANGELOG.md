@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.5 — 2026-10-06
+
+- Add native fixed-ID contract preparation, read-only review and explicit owner
+  confirmation inside the current OSS application's HTTP security boundary.
+- Preserve the current Cowork journeys, recovery, signed result delivery and
+  incremental journal read model; no historical unsupported authoring route opens.
+- Require APatch 0.8.50 or newer so ordinary installs include the portable intake
+  SDK without private migration modules or developer checkout paths.
+- Package, API health and OpenAPI metadata consistently report 0.1.5.
+- The three runtime files bind to their exact public transfer commit; source,
+  built-artifact and installed-pair qualification remain separate from publication.
+
 ## 0.1.4 — 2026-10-05
 
 - Studio opens without waiting for the full local history scan; Plans and Admin
