@@ -16,8 +16,19 @@ PUBLICATION = ROOT / "release" / "publication.json"
 _REQUIREMENTS = {
     "0.1.2": "SPEC-STUDIO-COWORK-RESULT-DELIVERY-1#R6",
     "0.1.3": "SPEC-STUDIO-INTERACTIVE-CHANGE-1#R2",
+    "0.1.4": "SPEC-STUDIO-READ-INDEX-1#R1",
 }
 _UI_FILES = ("frontend/src/ChangeDetailView.tsx", "frontend/src/outside-in.css")
+_READ_MODEL_FILES = (
+    "apatch_studio/adapter.py",
+    "apatch_studio/app.py",
+    "apatch_studio/read_index.py",
+    "frontend/src/OutsideInAdmin.tsx",
+    "frontend/src/OutsideInApp.tsx",
+    "frontend/src/OutsideInViews.tsx",
+    "frontend/src/readModelVisibility.ts",
+    "frontend/src/types.ts",
+)
 
 
 def _version(value: str) -> tuple[int, int, int]:
@@ -54,7 +65,11 @@ def _assert_candidate_binding(root: Path) -> None:
     assert _git(root, "rev-parse", commit).decode().strip() == commit
     _git(root, "merge-base", "--is-ancestor", commit, "HEAD")
     source_file = candidate["source_file"]
-    expected_file = _UI_FILES[0] if candidate["version"] == "0.1.3" else "apatch_studio/result_delivery.py"
+    expected_file = (
+        "apatch_studio/read_index.py" if candidate["version"] == "0.1.4"
+        else _UI_FILES[0] if candidate["version"] == "0.1.3"
+        else "apatch_studio/result_delivery.py"
+    )
     assert source_file == expected_file
     source = _git(root, "show", f"{commit}:{source_file}")
     assert hashlib.sha256(source).hexdigest() == candidate["source_file_sha256"]
@@ -74,6 +89,8 @@ def _assert_candidate_binding(root: Path) -> None:
             assert hashlib.sha256(recorded).hexdigest() == entry["sha256"]
             assert (root / entry["path"]).read_bytes() == recorded
         assert binding["files"][0]["sha256"] == candidate["source_file_sha256"]
+    if candidate["version"] == "0.1.4":
+        _assert_incremental_binding(root, candidate)
 
 
 def test_governed_candidate_version_is_exact_and_advances() -> None:
@@ -188,3 +205,122 @@ def test_candidate_rejects_inexact_ui_binding(ui_candidate: Path, failure: str) 
         _write_json(binding_path, binding)
     with pytest.raises((AssertionError, FileNotFoundError)):
         _assert_candidate_binding(ui_candidate)
+
+
+def _assert_incremental_binding(root: Path, candidate: dict[str, object]) -> None:
+    assert candidate["previous_published_version"] == "0.1.3"
+    binding = json.loads(
+        (root / "release/read-model-source-binding.json").read_text(encoding="utf-8")
+    )
+    assert set(binding) == {"schema", "version", "requirement", "source_commit", "files"}
+    assert binding["schema"] == "apatch.studio.read-model-source-binding.v1"
+    for field in ("version", "requirement", "source_commit"):
+        assert binding[field] == candidate[field]
+    assert [entry["path"] for entry in binding["files"]] == list(_READ_MODEL_FILES)
+    for entry in binding["files"]:
+        assert set(entry) == {"path", "sha256"}
+        assert re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+        recorded = _git(root, "show", f"{candidate['source_commit']}:{entry['path']}")
+        assert hashlib.sha256(recorded).hexdigest() == entry["sha256"]
+        assert (root / entry["path"]).read_bytes() == recorded
+    primary = next(entry for entry in binding["files"] if entry["path"] == candidate["source_file"])
+    assert primary["sha256"] == candidate["source_file_sha256"]
+
+
+@pytest.fixture
+def incremental_candidate(ui_candidate: Path) -> Path:
+    """Synthetic version fixture, not owner consent or release qualification."""
+    root = ui_candidate
+    for source_file in _READ_MODEL_FILES:
+        path = root / source_file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Exact synthetic read model bytes: " + source_file + "\n")
+    _git(root, "add", "--all")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+         "-c", "commit.gpgsign=false", "commit", "--no-verify", "-qm",
+         "Synthetic incremental source binding fixture")
+    commit = _git(root, "rev-parse", "HEAD").decode().strip()
+    files = [
+        {"path": path, "sha256": hashlib.sha256((root / path).read_bytes()).hexdigest()}
+        for path in _READ_MODEL_FILES
+    ]
+    primary = next(entry for entry in files if entry["path"] == "apatch_studio/read_index.py")
+    _write_json(root / "release/candidate.json", {
+        "schema": "apatch.studio.oss-candidate.v1", "version": "0.1.4",
+        "previous_published_version": "0.1.3", "source_commit": commit,
+        "source_file": primary["path"], "source_file_sha256": primary["sha256"],
+        "requirement": _REQUIREMENTS["0.1.4"],
+    })
+    _write_json(root / "release/read-model-source-binding.json", {
+        "schema": "apatch.studio.read-model-source-binding.v1", "version": "0.1.4",
+        "requirement": _REQUIREMENTS["0.1.4"], "source_commit": commit, "files": files,
+    })
+    _write_json(root / "release/publication.json", {"version": "0.1.3"})
+    (root / "pyproject.toml").write_text('[project]\nversion = "0.1.4"\n')
+    return root
+
+
+def test_exact_incremental_candidate_binds_every_runtime_and_ui_file(
+    incremental_candidate: Path,
+) -> None:
+    _assert_candidate_binding(incremental_candidate)
+
+
+@pytest.mark.parametrize("source_file", _READ_MODEL_FILES)
+def test_incremental_candidate_rejects_each_source_file_drift(
+    incremental_candidate: Path, source_file: str,
+) -> None:
+    (incremental_candidate / source_file).write_text("Changed after source binding\n")
+    with pytest.raises(AssertionError):
+        _assert_candidate_binding(incremental_candidate)
+
+
+@pytest.mark.parametrize("failure", [
+    "schema", "version", "requirement", "commit", "extra_binding_field",
+    "missing_file", "extra_file", "duplicate_file", "reversed_files",
+    "bad_hash", "forged_hash", "extra_file_field", "missing_binding",
+    "wrong_previous_version", "wrong_primary_file", "wrong_primary_hash",
+    "candidate_extra_field", "publication_mismatch",
+])
+def test_incremental_candidate_rejects_inexact_binding(
+    incremental_candidate: Path, failure: str,
+) -> None:
+    root = incremental_candidate
+    candidate_path = root / "release/candidate.json"
+    candidate = json.loads(candidate_path.read_text())
+    binding_path = root / "release/read-model-source-binding.json"
+    binding = json.loads(binding_path.read_text())
+    if failure in {"schema", "version", "requirement", "commit"}:
+        key = "source_commit" if failure == "commit" else failure
+        binding[key] = "0" * 40 if failure == "commit" else "inexact"
+    elif failure == "extra_binding_field":
+        binding["extra"] = True
+    elif failure == "missing_file":
+        binding["files"].pop()
+    elif failure == "extra_file":
+        binding["files"].append({"path": "unexpected.py", "sha256": "0" * 64})
+    elif failure == "duplicate_file":
+        binding["files"][1] = dict(binding["files"][0])
+    elif failure == "reversed_files":
+        binding["files"].reverse()
+    elif failure in {"bad_hash", "forged_hash"}:
+        binding["files"][0]["sha256"] = "not-a-hash" if failure == "bad_hash" else "0" * 64
+    elif failure == "extra_file_field":
+        binding["files"][0]["extra"] = True
+    elif failure == "missing_binding":
+        binding_path.unlink()
+    elif failure == "wrong_previous_version":
+        candidate["previous_published_version"] = "0.1.1"
+    elif failure == "wrong_primary_file":
+        candidate["source_file"] = _UI_FILES[0]
+    elif failure == "wrong_primary_hash":
+        candidate["source_file_sha256"] = "0" * 64
+    elif failure == "candidate_extra_field":
+        candidate["extra"] = True
+    elif failure == "publication_mismatch":
+        _write_json(root / "release/publication.json", {"version": "0.1.1"})
+    _write_json(candidate_path, candidate)
+    if failure != "missing_binding":
+        _write_json(binding_path, binding)
+    with pytest.raises((AssertionError, FileNotFoundError)):
+        _assert_candidate_binding(root)

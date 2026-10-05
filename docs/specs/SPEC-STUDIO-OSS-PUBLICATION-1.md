@@ -82,7 +82,14 @@ The previous immutable publication record may remain at the previous version
 until the new wheel and sdist have been built and qualified under R9. A candidate
 record alone never satisfies the release gate or claims a PyPI upload.
 
-(verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py::test_governed_candidate_version_is_exact_and_advances)
+For version 0.1.4, the previous release is the immutable GitHub release 0.1.3.
+The candidate binds the attested incremental-read-model commit and all eight
+runtime/browser source files in `release/read-model-source-binding.json`.
+The historical 0.1.2 and 0.1.3 binding checks remain unchanged. Qualification must
+also reject drift of each of the eight files and malformed or incomplete binding
+records; this candidate record does not establish artifact qualification.
+
+(verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py)
 
 ## Traceability
 
