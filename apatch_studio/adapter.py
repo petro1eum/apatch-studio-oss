@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from apatch import __version__ as apatch_version
 from apatch.artifact_governance import build_doctor_hygiene
 from apatch.doctor import run_doctor
+from apatch.mcp_health import mcp_tool_catalog, read_stored_mcp_fingerprint
 from apatch.project_status import _activity_from_index
 from apatch.runtime.session import build_session_view
 from apatch.spec import _ledger_entries, _load_spec
@@ -31,6 +32,7 @@ from apatch_studio.runtime_requirements import probe_runtime_requirements
 from apatch_studio.change_details import project_signed_change_detail
 from apatch_studio.change_history import project_signed_changes
 from apatch_studio.projection import assert_projection_safe
+from apatch_studio.read_index import WorkspaceReadIndex, spec_entry_groups, runtime_posture
 from apatch_studio.project_documents import ProjectKnowledgeWorkspace
 
 
@@ -85,7 +87,7 @@ def _timestamp(value: Any) -> str | None:
 
 
 class APatchStudioAdapter:
-    def __init__(self, workspace: str | os.PathLike[str], *, cache_ttl: float = 2.0):
+    def __init__(self, workspace: str | os.PathLike[str], *, cache_ttl: float = 2.0, nonblocking: bool = False):
         self.root = Path(workspace).expanduser().resolve()
         if not (self.root / ".git").exists():
             raise ValueError(f"workspace is not a git repository: {self.root}")
@@ -94,6 +96,18 @@ class APatchStudioAdapter:
         self._cached: dict[str, Any] | None = None
         self._lock = threading.Lock()
         self.project_documents = ProjectKnowledgeWorkspace(self.root)
+        self.read_index = WorkspaceReadIndex(self.root)
+        self.nonblocking = nonblocking
+        self._worker: threading.Thread | None = None
+        self._read_error: str | None = None
+        self._shell: dict[str, Any] | None = None
+        self._runtime: dict[str, Any] | None = None
+        # Canonical local catalog metadata is available before history builds.
+        # This does not audit the archive or claim protection/coverage readiness.
+        self._shell_mcp_health = {
+            "mcp_tool_catalog": mcp_tool_catalog(),
+            "stored_mcp_fingerprint": read_stored_mcp_fingerprint(str(self.root)),
+        }
 
     def _workspace(self) -> dict[str, Any]:
         porcelain = _git(self.root, "status", "--porcelain=v1")
@@ -247,15 +261,16 @@ class APatchStudioAdapter:
     def _canonical_status_snapshot(self, *, include_hygiene: bool = True) -> dict[str, Any]:
         """Compose one file-drift-aware APatch snapshot from one ledger read."""
 
-        entries, ledger_active = _ledger_entries(str(self.root))
-        trace_index = build_traceability_index(entries or [])
+        entries, ledger_active, trace_index, entry_groups, global_entries = (
+            self.read_index.snapshot(fallback=_ledger_entries)
+        )
         specs: list[dict[str, Any]] = []
         errors: list[str] = []
 
         for spec_id in _discover_spec_ids(str(self.root)):
             try:
                 parsed = _load_spec(str(self.root), spec=spec_id)
-                coverage = spec_coverage_from_entries(parsed, entries, str(self.root))
+                coverage = spec_coverage_from_entries(parsed, entry_groups.get(spec_id, global_entries), str(self.root))
                 requirements = list(coverage.get("requirements") or [])
                 summary = dict(coverage.get("summary") or {})
                 summary["blocked"] = sum(
@@ -325,30 +340,11 @@ class APatchStudioAdapter:
             "changes": project_signed_changes(entries or [], limit=80),
         }
 
-    def _build(self) -> dict[str, Any]:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            status_future = executor.submit(
-                self._canonical_status_snapshot, include_hygiene=False
-            )
-            doctor_future = executor.submit(run_doctor, str(self.root))
-            status = status_future.result()
-            doctor = doctor_future.result()
-        session = build_session_view(str(self.root))
-        try:
-            assets = list_work_assets(str(self.root), limit=24)
-            asset_error = None
-        except Exception as exc:  # optional projection must degrade independently
-            assets = {"asset_count": 0, "lifecycle_counts": {}, "assets": []}
-            asset_error = type(exc).__name__
-
+    def _runtime_projection(self, doctor: dict[str, Any]) -> dict[str, Any]:
         hygiene = doctor.get("hygiene") or doctor.get("runtime_hygiene") or {}
         writer = doctor.get("writer_protocol") or {}
         catalog = (doctor.get("mcp_health") or {}).get("mcp_tool_catalog") or {}
-        projection = {
-            "schema": "apatch.studio.workspace-overview.v1",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "workspace": self._workspace(),
-            "runtime": {
+        runtime = {
                 "apatch_version": doctor.get("version") or apatch_version,
                 "mcp_profile": self._mcp_profile(doctor),
                 "tool_count": int(catalog.get("count") or 0),
@@ -372,7 +368,37 @@ class APatchStudioAdapter:
                     tool_count=int(catalog.get("count") or 0),
                     concurrent_writers=bool(writer.get("disjoint_concurrency")),
                 ),
-            },
+            }
+        assert_projection_safe(runtime)
+        return runtime
+
+    def _build(self) -> dict[str, Any]:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            status_future = executor.submit(
+                self._canonical_status_snapshot, include_hygiene=False
+            )
+            doctor_future = executor.submit(runtime_posture, self.root)
+            doctor = doctor_future.result()
+            # Publish configuration independently before history can fail.
+            # No authority is granted by this read-only posture.
+            self._runtime = self._runtime_projection(doctor)
+            status = status_future.result()
+        session = build_session_view(str(self.root))
+        try:
+            assets = list_work_assets(str(self.root), limit=24)
+            asset_error = None
+        except Exception as exc:  # optional projection must degrade independently
+            assets = {"asset_count": 0, "lifecycle_counts": {}, "assets": []}
+            asset_error = type(exc).__name__
+
+        hygiene = doctor.get("hygiene") or doctor.get("runtime_hygiene") or {}
+        writer = doctor.get("writer_protocol") or {}
+        catalog = (doctor.get("mcp_health") or {}).get("mcp_tool_catalog") or {}
+        projection = {
+            "schema": "apatch.studio.workspace-overview.v1",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "workspace": self._workspace(),
+            "runtime": self._runtime,
             "summary": dict(status.get("summary") or {}),
             "project_brief": self.project_documents.project_brief(),
             "plans": self.project_documents.catalog(status),
@@ -394,25 +420,119 @@ class APatchStudioAdapter:
         assert_projection_safe(projection)
         return projection
 
+    def _read_state(self, status: str) -> dict[str, Any]:
+        state = {"status": status, "generation": self.read_index.generation,
+                 "scope": "workspace_projection", "rebuild_on_restart": True}
+        diagnostic = self.read_index.failure_summary()
+        if status == "unavailable" and diagnostic is not None:
+            state["diagnostic"] = diagnostic
+        return state
+
+    def _initial_projection(self, state: str) -> dict[str, Any]:
+        if self._shell is None:
+            profile = self._mcp_profile({"mcp_health": self._shell_mcp_health})
+            tool_count = int((self._shell_mcp_health.get("mcp_tool_catalog") or {}).get("count") or 0)
+            self._shell = {
+                "schema": "apatch.studio.workspace-overview.v1",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "workspace": self._workspace(),
+                "runtime": {
+                    "apatch_version": apatch_version, "mcp_profile": profile,
+                    "tool_count": tool_count, "trust_mode": "unknown", "enforcement": False,
+                    "trust_anchor": "unknown", "writer_protocol": None,
+                    "concurrent_writers": False, "hygiene": "unknown", "hygiene_issues": [],
+                    "endpoint_identity": endpoint_identity_status(str(self.root)),
+                    "requirements": probe_runtime_requirements(version=apatch_version),
+                    "capability_contract": build_runtime_capability_contract(
+                        version=apatch_version, profile=profile, tool_count=tool_count,
+                        concurrent_writers=False),
+                },
+                "summary": {"coverage_status": "unavailable"},
+                "project_brief": self.project_documents.project_brief(),
+                "plans": self.project_documents.catalog(self._unavailable_status()),
+                "session": self._session(build_session_view(str(self.root))),
+                "specifications": [], "evidence": [], "changes": [],
+                "work_assets": self._work_assets({"assets": [], "asset_count": 0}),
+                "degraded": ["read_model"],
+            }
+            assert_projection_safe(self._shell)
+        return {**self._shell, "runtime": self._runtime or self._shell["runtime"],
+                "read_model": self._read_state(state)}
+
+    def _background_build(self) -> None:
+        try:
+            result = self._build()
+            result = {**result, "read_model": self._read_state("ready")}
+            assert_projection_safe(result)
+        except Exception as exc:
+            with self._lock:
+                self._read_error = type(exc).__name__
+            return
+        with self._lock:
+            self._cached = result
+            self._cached_at = time.monotonic()
+            self._read_error = None
+
+    def wait_for_read_model(self, *, timeout: float) -> None:
+        with self._lock:
+            worker = self._worker
+        if worker is not None:
+            worker.join(timeout)
+
     def overview(self, *, force: bool = False) -> dict[str, Any]:
         with self._lock:
             now = time.monotonic()
+            if self.nonblocking:
+                if self._worker is not None and self._worker.is_alive():
+                    if self._cached is not None:
+                        return {**self._cached, "read_model": self._read_state("refreshing")}
+                    return self._initial_projection("building")
+                if self._read_error is not None and not force:
+                    return self._initial_projection("unavailable")
+                if not force and self._cached is not None and now - self._cached_at < self.cache_ttl:
+                    return self._cached
+                self._read_error = None
+                self._worker = threading.Thread(target=self._background_build,
+                                                name="studio-read-model", daemon=True)
+                self._worker.start()
+                if self._cached is not None:
+                    return {**self._cached, "read_model": self._read_state("refreshing")}
+                return self._initial_projection("building")
             if not force and self._cached is not None and now - self._cached_at < self.cache_ttl:
                 return self._cached
             self._cached = self._build()
             self._cached_at = time.monotonic()
             return self._cached
 
+    def _unavailable_status(self) -> dict[str, Any]:
+        return {"summary": {"coverage_status": "unavailable"},
+                "specs": [{"id": spec_id, "coverage_status": "unavailable",
+                           "requirements": [], "summary": {}}
+                          for spec_id in _discover_spec_ids(str(self.root))]}
+
+    def _document_status(self) -> dict[str, Any]:
+        with self._lock:
+            if self._read_error is not None or (self._worker is not None and self._worker.is_alive()):
+                return self._unavailable_status()
+        try:
+            return self._canonical_status_snapshot()
+        except (OSError, ValueError, RuntimeError):
+            return self._unavailable_status()
+
     def document_catalog(self) -> dict[str, Any]:
-        projection = self.project_documents.catalog(self._canonical_status_snapshot())
+        projection = self.project_documents.catalog(self._document_status())
         assert_projection_safe(projection)
         return projection
 
     def document_detail(self, document_id: str) -> dict[str, Any]:
-        projection = self.project_documents.document(
-            document_id,
-            self._canonical_status_snapshot(),
-        )
+        status = self._document_status()
+        projection = self.project_documents.document(document_id, status)
+        if (status.get("summary") or {}).get("coverage_status") == "unavailable":
+            for row in projection.get("requirements") or []:
+                row.update(state="blocked", state_label="Status unavailable",
+                           available_action="inspect_proof",
+                           verification={"outcome": "blocked", "label": "Evidence unavailable",
+                                         "explanation": "The local signed history cannot be read."})
         assert_projection_safe(projection)
         return projection
 

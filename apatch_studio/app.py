@@ -167,7 +167,7 @@ def create_app(
 ) -> FastAPI:
     frontend = Path(frontend_root) if frontend_root else _frontend_root()
     active_edition = StudioEdition.parse(edition)
-    runtime_adapter = adapter or APatchStudioAdapter(workspace)
+    runtime_adapter = adapter or APatchStudioAdapter(workspace, nonblocking=True)
     runtime_workflows = workflow_facade or StudioWorkflowFacade(workspace)
     runtime_review = review_handoff or LocalReviewHandoff(workspace)
     runtime_delivery = delivery_workflow or GitDeliveryWorkflow(workspace)

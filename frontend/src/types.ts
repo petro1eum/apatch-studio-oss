@@ -992,6 +992,18 @@ export interface ActionReceipt<T extends Record<string, unknown> = Record<string
 }
 
 export interface WorkspaceOverview {
+  read_model?: {
+    status: "building" | "ready" | "refreshing" | "unavailable";
+    generation: number;
+    scope: string;
+    rebuild_on_restart: boolean;
+    diagnostic?: {
+      code: "invalid_ledger_objects";
+      affected_count: number;
+      truncated: boolean;
+      items: { object_id: string; digest: string; reason: "invalid_json" | "invalid_record" }[];
+    };
+  };
   schema: string;
   generated_at: string;
   workspace: {

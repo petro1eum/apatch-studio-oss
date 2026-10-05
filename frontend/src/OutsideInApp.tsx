@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { runtimeAttention } from "./productLanguage";
+import { canRenderWorkspaceView } from "./readModelVisibility";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { loadChangeFeed, loadOverview, loadRunners, refreshOverview } from "./api";
@@ -103,10 +104,11 @@ export function OutsideInApp() {
 
   useEffect(() => {
     const active = runs.some((run) => run.status === "queued" || run.status === "running");
-    if (!active) return;
+    const indexing = data?.read_model?.status === "building" || data?.read_model?.status === "refreshing";
+    if (!active && !indexing) return;
     const timer = window.setInterval(() => void hydrate(), 2500);
     return () => window.clearInterval(timer);
-  }, [hydrate, runs]);
+  }, [hydrate, runs, data?.read_model?.status]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -169,7 +171,7 @@ export function OutsideInApp() {
           </div>
           <button className={"oi-runtime-card" + (data.runtime.hygiene === "clean" && data.runtime.requirements.ok ? "" : " is-attention")} type="button" title={data.runtime.hygiene === "clean" && data.runtime.requirements.ok ? "Open Admin" : runtimeAttention(data.runtime) + ". Open Admin for the next step."} onClick={() => navigate("admin", "runtime")}>
             <span>Local runtime</span>
-            <strong>{data.runtime.enforcement ? "Protected" : "Audit mode"} · APatch {data.runtime.apatch_version}</strong>
+            <strong>{data.runtime.trust_mode === "unknown" ? "Runtime status pending" : data.runtime.enforcement ? "Protected" : "Audit mode"} · APatch {data.runtime.apatch_version}</strong>
             {data.runtime.hygiene === "clean" && data.runtime.requirements.ok ? null : <small>{runtimeAttention(data.runtime)} · {data.runtime.requirements.ok ? "Open Admin to run safe cleanup" : "Open Admin for the update step"}</small>}
           </button>
         </div>
@@ -184,7 +186,36 @@ export function OutsideInApp() {
           </div>
         </header>
         <main className="oi-main">
+        {data.read_model?.status === "building" || data.read_model?.status === "refreshing" ? (
+          <div className="oi-global-error" role="status"><LoaderCircle className="spin" size={18} /><span>Reading local history. Evidence will appear when the workspace index is ready.</span></div>
+        ) : null}
+        {data.read_model?.status === "unavailable" ? (
+          <div className="oi-global-error" role="alert">
+            <span>Local history could not be read. Evidence is unavailable. Plans and runtime settings remain accessible.</span>
+            <button type="button" onClick={() => void hydrate(true)}>Retry</button>
+            {data.read_model.diagnostic ? <details>
+              <summary>Technical details: {data.read_model.diagnostic.affected_count} invalid history objects</summary>
+              <p>Original history is unchanged. No invalid objects have been skipped.</p>
+              <ul>{data.read_model.diagnostic.items.map((item, position) => <li key={item.object_id + item.digest + position}>
+                <code>{item.object_id}</code> — {item.reason} — <code>{item.digest}</code>
+              </li>)}</ul>
+              {data.read_model.diagnostic.truncated ? <p>Showing the first 16 objects only.</p> : null}
+            </details> : null}
+          </div>
+        ) : null}
         {error ? <div className="oi-global-error" role="alert"><span>{error}</span><button type="button" title="Dismiss" onClick={() => setError(null)}><X size={15} /></button></div> : null}
+        {!canRenderWorkspaceView(route.view, data.read_model?.status) ? (
+          <section className="oi-panel">
+            <h1>{data.read_model?.status === "building" ? "Workspace is opening" : "History needs attention"}</h1>
+            <p>{data.read_model?.status === "building"
+              ? "Signed evidence is being indexed. You can read plans or inspect runtime settings now."
+              : "Signed evidence cannot be shown until the history problem is resolved. Your documents and runtime configuration are still available."}</p>
+            <div className="oi-action-row">
+              <button className="oi-button oi-button-primary" type="button" onClick={() => navigate("backlog")}>Open plans</button>
+              <button className="oi-button oi-button-secondary" type="button" onClick={() => navigate("admin")}>Open runtime settings</button>
+            </div>
+          </section>
+        ) : <>
         {route.view === "home" ? (
           route.resourceId ? (
             <ChangeDetailView
@@ -205,6 +236,7 @@ export function OutsideInApp() {
         {route.view === "library" ? <LibraryView data={data} section={(["methods", "proof", "time"].includes(route.section) ? route.section : "methods") as "methods" | "proof" | "time"} onSection={(section) => navigate("library", section)} runners={runners} onChanged={() => hydrate(true)} /> : null}
         {route.view === "admin" ? <AdminView data={data} runners={runners} section={(["runtime", "workspaces", "rules"].includes(route.section) ? route.section : "runtime") as "runtime" | "workspaces" | "rules"} onSection={(section) => navigate("admin", section)} requestConfirm={setConfirm} onChanged={() => hydrate(true)} /> : null}
         {route.view === "inbox" ? <InboxView data={data} runners={runners} onChanged={() => hydrate(true)} /> : null}
+        </>}
         </main>
       </div>
 
