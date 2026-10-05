@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.4 — Unreleased
+## 0.1.4 — 2026-10-05
 
 - Studio opens without waiting for the full local history scan; Plans and Admin
   remain available while the read model is building or history is unavailable.

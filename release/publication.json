@@ -1,16 +1,16 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.3",
-  "source_commit": "c02c2609e296551cf9434ff9701835be30008419",
-  "public_candidate_commit": "aac45827b87373d3a19e4624d8c6626076b9132e",
+  "version": "0.1.4",
+  "source_commit": "75d2002ca6195bfcae1586eefcca3b1ce950948f",
+  "public_candidate_commit": "20e6e721a7729f3c40f03900b294372ceee8dd04",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.3-py3-none-any.whl",
-      "sha256": "e8fa7c42014bb56ad237550cc462ad3a06d976e3454860219531b196878624ef"
+      "filename": "apatch_studio-0.1.4-py3-none-any.whl",
+      "sha256": "a8a2bf2e20df24c21b12e8a74fa4927acd9cd09039318d729b2fe1931ec7289c"
     },
     {
-      "filename": "apatch_studio-0.1.3.tar.gz",
-      "sha256": "1a4e7ba1a0f3cabf0a1d6aba0bf6565c6c16595a11fb7d6087a1b040e7350c75"
+      "filename": "apatch_studio-0.1.4.tar.gz",
+      "sha256": "b6d7ce1f82b269fe17d1325d9e8b24f1ed8f28949ffbfa25d80a6737aa7136c5"
     }
   ],
   "verification": [
@@ -20,20 +20,45 @@
     },
     {
       "command": "python -B -m pytest -q -p no:cacheprovider --ignore=tests/oss_publication/test_distribution_artifact.py --ignore=tests/oss_publication/test_release_evidence.py",
-      "result": "passed: 659 tests; native artifact assertions and exact-wheel client checks run separately"
+      "result": "passed: 705 tests, including frozen incremental-history and unavailable-history judges; exact archive and release-record checks run separately"
     },
     {
-      "command": "python -I -m build --no-isolation --outdir dist",
-      "result": "passed: wheel and sdist from exact candidate commit"
+      "command": "python -B -m pytest -q -p no:cacheprovider tests/oss_publication/test_distribution_artifact.py",
+      "result": "passed: 2 unchanged tests; wheel/sdist built from the committed candidate and the exact wheel installed with current PyPI dependencies in an isolated environment"
     },
     {
-      "command": "python -I -m twine check dist/apatch_studio-0.1.3-py3-none-any.whl dist/apatch_studio-0.1.3.tar.gz",
-      "result": "passed: both archives"
+      "command": "python -m twine check dist/apatch_studio-0.1.4-py3-none-any.whl dist/apatch_studio-0.1.4.tar.gz",
+      "result": "passed: both qualified archives"
     },
     {
-      "command": "python -I -B -c '\nimport hashlib, importlib.metadata as metadata, json, pathlib, sys, sysconfig\nfrom fastapi.testclient import TestClient\nimport apatch, apatch_studio\nfrom apatch_studio.app import create_app\nfrom apatch_studio.cli import _parser\nsite = pathlib.Path(sysconfig.get_path(\"purelib\")).resolve()\nfor module in (apatch, apatch_studio):\n    assert pathlib.Path(module.__file__).resolve().is_relative_to(site)\nassert apatch.__version__ == metadata.version(\"apatch\") == \"0.8.49\"\nassert apatch_studio.__version__ == metadata.version(\"apatch-studio\") == \"0.1.3\"\nweb = site / \"apatch_studio/_web\"\nassets = {\"/\" + path.relative_to(web).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in web.rglob(\"*\") if path.is_file() and path.name != \"index.html\"}\napp = create_app(sys.argv[1])\nwith TestClient(app, base_url=\"http://127.0.0.1:8765\") as client:\n    health = client.get(\"/api/v1/health\")\n    root = client.get(\"/\")\n    assert health.status_code == 200 and health.json()[\"version\"] == \"0.1.3\"\n    assert root.status_code == 200 and \"__APATCH_STUDIO_SESSION__\" not in root.text\n    assert next(route.path for route in app.routes if route.path == \"/assets\") == \"/assets\"\n    served = {}\n    for url, expected in assets.items():\n        response = client.get(url)\n        assert response.status_code == 200\n        actual = hashlib.sha256(response.content).hexdigest()\n        assert actual == expected, url\n        served[url] = actual\ncommands = set(_parser()._subparsers._group_actions[0].choices)\nassert commands == {\"serve\", \"name-this-machine\", \"enroll\"}\nprint(json.dumps({\"studio_version\": \"0.1.3\", \"sdk_version\": \"0.8.49\", \"wheel_imports\": {\"apatch\": apatch.__file__, \"apatch_studio\": apatch_studio.__file__}, \"commands\": sorted(commands), \"served_assets\": served, \"health_http\": 200, \"root_http\": 200}))\n' verification-workspace",
-      "result": "passed: isolated exact SDK 0.8.49 and Studio 0.1.3 wheel imports, HTTP health/root/assets, OSS CLI"
+      "command": "python -I -c 'import json,sysconfig,hashlib,zipfile,importlib.metadata as m; from pathlib import Path; w=Path(\"dist/apatch_studio-0.1.4-py3-none-any.whl\"); site=Path(sysconfig.get_path(\"purelib\")); d=json.loads((site/\"apatch_studio-0.1.4.dist-info/direct_url.json\").read_text()); h=hashlib.sha256(w.read_bytes()).hexdigest(); assert d[\"archive_info\"][\"hashes\"][\"sha256\"] == h; z=zipfile.ZipFile(w); n=[n for n in z.namelist() if n.startswith(\"apatch_studio/\")]; assert all((site/n).read_bytes()==z.read(n) for n in n); print(json.dumps({\"studio\":m.version(\"apatch-studio\"),\"apatch\":m.version(\"apatch\"),\"trustchain\":m.version(\"trustchain\"),\"installed_files_match_wheel\":len(n),\"installed_wheel_sha256\":h}))'",
+      "result": "passed: Studio 0.1.4, APatch 0.8.48 and TrustChain 3.3.0; direct_url binds installation to the qualified wheel hash and all 44 installed runtime/web files match"
     }
   ],
-  "note": "Qualification used a physical offline Python environment containing the exact recorded wheels and audited existing dependencies, without system site-packages, pip, network dependency installation or CI. Commands use that environment Python and normalized relative paths; the final inline check ran against a disposable Git workspace. Native archive boundary assertions, all RECORD hashes and bundled frontend bytes were also verified. The historical 0.1.2 record is retained separately. This artifact qualification record does not claim a PyPI upload."
+  "additional_inspection": {
+    "runtime_files_match_candidate": 40,
+    "sdist_files_match_candidate": 87,
+    "record_hashes_verified": 49,
+    "prohibited_members": [],
+    "foreign_untracked_files": [],
+    "web_assets": [
+      {
+        "path": "assets/index-B5jro5Dw.css",
+        "sha256": "fdb16c09ef821b7c4ff70b42b22c14ac215d0cefcd76394a8ed18fe53b5922a5"
+      },
+      {
+        "path": "assets/index-BmdBDYH0.js",
+        "sha256": "c99593b8052285fc86a82966daf356ab1f6c14b9c5028722f217a86ba28d0b18"
+      },
+      {
+        "path": "index.html",
+        "sha256": "432cb436bd1aed409361238ffaa1aef3a0cb661fda071aee1e642dff9351e636"
+      },
+      {
+        "path": "theme-init.js",
+        "sha256": "9028d47ef9295178d07c4b19042dfb40c76e944e4ce120a80df379ef39f85094"
+      }
+    ]
+  },
+  "note": "Source qualification used an isolated SDK 0.8.49 environment; installation qualification used dependencies actually available from PyPI, including SDK 0.8.48. Commands use normalized relative paths. The wheel and sdist are the exact archives built and installed by the unchanged distribution fixture, not a later rebuild. Archive inspection verifies every runtime file against the candidate, all RECORD hashes, the MIT license and identical bundled browser assets in both archives; no Pro code, private metadata or foreign untracked files are included. The 0.1.3 record, tag and archives remain unchanged. The nested disposable-workspace journey does not complete inside the existing MCP broker environment, while the identical judge passes in the 705-test standalone suite; this record does not claim all publication requirements have native broker attestations. Artifact qualification and external publication are distinct."
 }
