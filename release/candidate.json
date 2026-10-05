@@ -1,9 +1,9 @@
 {
   "schema": "apatch.studio.oss-candidate.v1",
-  "version": "0.1.3",
-  "previous_published_version": "0.1.2",
-  "source_commit": "c02c2609e296551cf9434ff9701835be30008419",
-  "source_file": "frontend/src/ChangeDetailView.tsx",
-  "source_file_sha256": "6a7b77d212b78d92a7c8ecc9ea133d59a27462e9c6269efd581dd991beb1ef56",
-  "requirement": "SPEC-STUDIO-INTERACTIVE-CHANGE-1#R2"
+  "version": "0.1.4",
+  "previous_published_version": "0.1.3",
+  "source_commit": "75d2002ca6195bfcae1586eefcca3b1ce950948f",
+  "source_file": "apatch_studio/read_index.py",
+  "source_file_sha256": "9666d104293738eeb01580ab32556f11b9874c64545689d7af10434eedf2bf68",
+  "requirement": "SPEC-STUDIO-READ-INDEX-1#R1"
 }
