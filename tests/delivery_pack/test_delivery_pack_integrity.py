@@ -233,7 +233,7 @@ def test_private_symlink_or_shared_file_is_not_followed(tmp_path, change_detail,
 
 
 def test_integrity_warning_and_stale_states_are_visible_in_ui():
-    source = (Path(delivery.__file__).parents[1] / "frontend/src/ChangeDetailView.tsx").read_text()
+    source = (Path(__file__).resolve().parents[2] / "frontend/src/ChangeDetailView.tsx").read_text()
     assert "Legacy delivery records are unverified" in source
     assert 'pack.acceptance.status === "stale"' in source
     assert 'pack.time_decision.status === "stale"' in source

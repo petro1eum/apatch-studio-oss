@@ -22,6 +22,8 @@ from apatch.traceability import build_traceability_index, _sort_key
 from apatch.trust_identity import anchor_status
 from apatch.trustchain_helper import TrustChainHelper
 
+from apatch_studio.ledger_events import LedgerEvents
+
 
 class WorkspaceReadIndex:
     def __init__(self, root: Path):
@@ -35,12 +37,38 @@ class WorkspaceReadIndex:
         self._invalid: dict[str, tuple[tuple[int, ...], dict[str, str]]] = {}
         self._diagnostic: dict[str, Any] | None = None
         self._fallback: tuple[list[dict[str, Any]], bool] | None = None
+        self._events: LedgerEvents | None = None
+        self._object_revisions: dict[str, int] = {}
+        self._watch_epoch = 0
         self.generation = 0
 
     @staticmethod
     def _stamp(path: Path) -> tuple[int, ...]:
         st = path.stat()
         return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+    def _notice_changes(self, paths: list[Path]) -> set[str]:
+        if not paths:
+            return set()
+        try:
+            if self._events is None:
+                self._events = LedgerEvents(self.root / ".trustchain")
+            changed = self._events.changed(paths)
+        except (OSError, RuntimeError):
+            # Loss of the OS's change history makes every cached identity
+            # uncertain. Reconstruct on retry; do not publish old rows as fresh.
+            self._events = None
+            self._watch_epoch += 1
+            self._parsed.clear()
+            self._invalid.clear()
+            raise RuntimeError("ledger_change_notifications_unavailable") from None
+        for key in changed:
+            self._object_revisions[key] = self._object_revisions.get(key, 0) + 1
+        return changed
+
+    def _cache_stamp(self, path: Path) -> tuple[int, ...]:
+        return self._stamp(path) + (self._watch_epoch,
+                                   self._object_revisions.get(str(path), 0))
 
     def failure_summary(self) -> dict[str, Any] | None:
         """Return a detached safe snapshot without blocking on a running scan."""
@@ -63,6 +91,14 @@ class WorkspaceReadIndex:
             view = SimpleNamespace(trustchain_dir=str(ledger_dir) if ledger_dir.is_dir() else None)
             paths = [Path(p) for p in TrustChainHelper._iter_ledger_json_paths(view)]
             current = {str(path) for path in paths}
+            if not ledger_dir.is_dir() and self._events is not None:
+                self._events = None
+                self._watch_epoch += 1
+            self._notice_changes(paths)
+            self._object_revisions = {
+                key: value for key, value in self._object_revisions.items()
+                if key in current
+            }
             # Evict deleted objects, including failed ones, from scan caches.
             self._parsed = {key: value for key, value in self._parsed.items() if key in current}
             self._invalid = {key: value for key, value in self._invalid.items() if key in current}
@@ -76,7 +112,7 @@ class WorkspaceReadIndex:
             failures = []
             for path in paths:
                 key = str(path)
-                stamp = self._stamp(path)
+                stamp = self._cache_stamp(path)
                 previous = self._parsed.get(key)
                 if previous is not None and previous[0] == stamp:
                     next_objects[key] = previous
@@ -88,7 +124,7 @@ class WorkspaceReadIndex:
                 self._parsed.pop(key, None)
                 self._invalid.pop(key, None)
                 raw = path.read_bytes()
-                if self._stamp(path) != stamp:
+                if self._cache_stamp(path) != stamp:
                     raise RuntimeError("ledger_changed_during_read")
                 reason = None
                 try:
@@ -114,6 +150,10 @@ class WorkspaceReadIndex:
                 parsed = (stamp, row)
                 self._parsed[key] = parsed
                 next_objects[key] = parsed
+            # Drain again before publishing. A write during the scan invalidates
+            # its cached parse, even when all stat fields remain identical.
+            if self._notice_changes(paths):
+                raise RuntimeError("ledger_changed_during_read")
             if failures:
                 items = sorted(failures, key=lambda item: (item["object_id"], item["digest"]))
                 self._diagnostic = {"code": "invalid_ledger_objects",
