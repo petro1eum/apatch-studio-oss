@@ -691,6 +691,9 @@ def create_app(
         ) -> dict[str, Any]:
             return runtime_intents.submit_result(intent_id, request)
 
+    from apatch_studio.contract_intake_workflow import install_routes as install_intake_routes
+    install_intake_routes(app, workspace, identity_root=lock_authority.identity_root)
+
     assets = frontend / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")

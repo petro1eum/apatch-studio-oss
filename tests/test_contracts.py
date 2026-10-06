@@ -18,7 +18,8 @@ def test_product_boundary():
 
     assert project["license"] == "MIT"
     assert project["description"] == "Local contract-driven workspace for governing AI-agent work with APatch and TrustChain Cowork"
-    assert any(dep.startswith("apatch[mcp]>=0.8.45") for dep in project["dependencies"])
+    expected_sdk = "apatch[mcp]>=0.8.50" if project["version"] == "0.1.5" else "apatch[mcp]>=0.8.45"
+    assert expected_sdk in project["dependencies"]
     assert "apatch studio oss" in readme
     assert "organization control plane" in readme
     assert "trustchain cowork" in readme
@@ -108,6 +109,9 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         ("/api/v1/delivery/actions", "POST"),
         ("/api/v1/timesheet/actions", "POST"),
         ("/api/v1/contributions/health", "GET"),
+        ("/api/v1/contract-intake/{spec_id}", "GET"),
+        ("/api/v1/contract-intake/{spec_id}", "POST"),
+        ("/api/v1/contract-intake/{spec_id}/approve", "POST"),
     }
     assert not {method for _path, method in routes}.intersection({"PUT", "PATCH", "DELETE"})
     forbidden_terms = {

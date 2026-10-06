@@ -18,7 +18,7 @@ their pinned bytes are not changed. No ledger recovery or publication is claimed
 
 ## R1 Retry cache without a partial published generation
 
-owns: apatch_studio/read_index.py
+owns: docs/specs/SPEC-STUDIO-HISTORY-FAILURE-1.md
 
 Retain successful parses and classified failures in disposable RAM keyed by
 the exact file stamp. Scan every canonical object, reuse unchanged successes
@@ -30,7 +30,7 @@ failures and keep valid source bytes unchanged.
 
 ## R2 Bounded safe diagnostics
 
-owns: apatch_studio/read_index.py, docs/specs/SPEC-STUDIO-HISTORY-FAILURE-1.md
+owns: docs/specs/SPEC-STUDIO-HISTORY-FAILURE-1.md
 
 Classify every invalid object as a count and a bounded list of 16 safe op ids,
 SHA-256 byte digests and enum reasons. Never expose raw text, absolute paths,
@@ -44,7 +44,7 @@ The owner authorized the exact R2 ownership declaration correction on
 
 ## R3 Independent runtime and truthful failure projection
 
-owns: apatch_studio/adapter.py
+owns: docs/specs/SPEC-STUDIO-HISTORY-FAILURE-1.md
 
 Preserve canonical lightweight runtime configuration separately from signed
 history. The posture survives history failure and never invokes full doctor.

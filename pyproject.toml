@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apatch-studio"
-version = "0.1.4"
+version = "0.1.5"
 description = "Local contract-driven workspace for governing AI-agent work with APatch and TrustChain Cowork"
 readme = "README.md"
 license = "MIT"
@@ -23,7 +23,7 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-  "apatch[mcp]>=0.8.45",
+  "apatch[mcp]>=0.8.50",
   "cryptography>=45,<47",
   "fastapi>=0.115,<1",
   "markdown-it-py>=4.0,<5",

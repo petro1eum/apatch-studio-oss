@@ -53,6 +53,11 @@ The effort draft remains an APatch-derived estimate bound to the displayed chang
 
 ## R6 Local and connected authority
 
+The UI source judge resolves the reviewed frontend from its own test-file root,
+not from the installed Python SDK. Its legacy-warning and both stale-state
+assertions remain mandatory and unchanged. This source inspection is separate
+from the installed API/runtime acceptance.
+
 OSS signs with a disclosed local owner identity held outside the project. Reads and retries pin the configured authority and verify the signed workspace-scoped journal, every act, ordered revisions and exact request-to-result binding. The basis fingerprints the available file projection byte-exactly, so replacing a displayed patch, path, mode or digest invalidates consent even when counts are unchanged; omitted/truncated source remains an explicit upstream limitation. Legacy project keys and decisions remain explicitly unverified and are never automatically adopted. Cowork may provide a signed named-authority decision while retaining the same canonical bytes and integrity floor; a local signature never implies organization consent.
 
 (verify: python3 -m pytest tests/delivery_pack/test_delivery_pack_signing.py::test_local_owner_signature_verifies tests/delivery_pack/test_delivery_pack_signing.py::test_connected_authority_cannot_weaken_semantics tests/delivery_pack/test_delivery_pack_integrity.py tests/delivery_pack/test_delivery_pack_content_basis.py -q)

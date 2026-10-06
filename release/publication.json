@@ -1,64 +1,39 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.4",
-  "source_commit": "75d2002ca6195bfcae1586eefcca3b1ce950948f",
-  "public_candidate_commit": "20e6e721a7729f3c40f03900b294372ceee8dd04",
+  "version": "0.1.5",
+  "source_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+  "public_candidate_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.4-py3-none-any.whl",
-      "sha256": "a8a2bf2e20df24c21b12e8a74fa4927acd9cd09039318d729b2fe1931ec7289c"
+      "filename": "apatch_studio-0.1.5-py3-none-any.whl",
+      "sha256": "385feb7c26c20b184c62f816fe324452e8446027c2713a044b87207165180e51"
     },
     {
-      "filename": "apatch_studio-0.1.4.tar.gz",
-      "sha256": "b6d7ce1f82b269fe17d1325d9e8b24f1ed8f28949ffbfa25d80a6737aa7136c5"
+      "filename": "apatch_studio-0.1.5.tar.gz",
+      "sha256": "8f45549c976c1c1aedda3bc87c42b7578319daf908467e04250d0c15c2071784"
     }
   ],
   "verification": [
     {
-      "command": "npm --prefix frontend run build",
-      "result": "passed: TypeScript and Vite"
+      "command": "python3 -m build --no-isolation --outdir /inputs/studio /reviewed/studio",
+      "result": "passed: wheel and sdist built from exact attested public repair candidate a9961c0e255f9d2aed7d07a0e8b72104ae09e650"
     },
     {
-      "command": "python -B -m pytest -q -p no:cacheprovider --ignore=tests/oss_publication/test_distribution_artifact.py --ignore=tests/oss_publication/test_release_evidence.py",
-      "result": "passed: 705 tests, including frozen incremental-history and unavailable-history judges; exact archive and release-record checks run separately"
+      "command": "python3 -m twine check /inputs/studio/apatch_studio-0.1.5-py3-none-any.whl /inputs/studio/apatch_studio-0.1.5.tar.gz",
+      "result": "passed: both exact final archives"
     },
     {
-      "command": "python -B -m pytest -q -p no:cacheprovider tests/oss_publication/test_distribution_artifact.py",
-      "result": "passed: 2 unchanged tests; wheel/sdist built from the committed candidate and the exact wheel installed with current PyPI dependencies in an isolated environment"
+      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+      "result": "passed: unchanged Core 0.8.50 archives and all 289 installed runtime members match the previously qualified public release; its completed 2500-pass standalone qualification reused"
     },
     {
-      "command": "python -m twine check dist/apatch_studio-0.1.4-py3-none-any.whl dist/apatch_studio-0.1.4.tar.gz",
-      "result": "passed: both qualified archives"
+      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+      "result": "passed: all 47 installed Studio runtime/web members match the exact wheel; complete unchanged suite plus three approved collision cases: 782 passed, zero failures, errors or skips"
     },
     {
-      "command": "python -I -c 'import json,sysconfig,hashlib,zipfile,importlib.metadata as m; from pathlib import Path; w=Path(\"dist/apatch_studio-0.1.4-py3-none-any.whl\"); site=Path(sysconfig.get_path(\"purelib\")); d=json.loads((site/\"apatch_studio-0.1.4.dist-info/direct_url.json\").read_text()); h=hashlib.sha256(w.read_bytes()).hexdigest(); assert d[\"archive_info\"][\"hashes\"][\"sha256\"] == h; z=zipfile.ZipFile(w); n=[n for n in z.namelist() if n.startswith(\"apatch_studio/\")]; assert all((site/n).read_bytes()==z.read(n) for n in n); print(json.dumps({\"studio\":m.version(\"apatch-studio\"),\"apatch\":m.version(\"apatch\"),\"trustchain\":m.version(\"trustchain\"),\"installed_files_match_wheel\":len(n),\"installed_wheel_sha256\":h}))'",
-      "result": "passed: Studio 0.1.4, APatch 0.8.48 and TrustChain 3.3.0; direct_url binds installation to the qualified wheel hash and all 44 installed runtime/web files match"
+      "command": "python3 -I -B -m pytest /reviewed/core/tests/portable_intake/test_portable_intake.py /reviewed/studio/tests/authoring/test_contract_intake_api.py --import-mode=importlib -q --junitxml=/qa-result/frozen43.xml",
+      "result": "passed: all 43 frozen installed Core/Studio functional cases; no failures, errors or skips"
     }
   ],
-  "additional_inspection": {
-    "runtime_files_match_candidate": 40,
-    "sdist_files_match_candidate": 87,
-    "record_hashes_verified": 49,
-    "prohibited_members": [],
-    "foreign_untracked_files": [],
-    "web_assets": [
-      {
-        "path": "assets/index-B5jro5Dw.css",
-        "sha256": "fdb16c09ef821b7c4ff70b42b22c14ac215d0cefcd76394a8ed18fe53b5922a5"
-      },
-      {
-        "path": "assets/index-BmdBDYH0.js",
-        "sha256": "c99593b8052285fc86a82966daf356ab1f6c14b9c5028722f217a86ba28d0b18"
-      },
-      {
-        "path": "index.html",
-        "sha256": "432cb436bd1aed409361238ffaa1aef3a0cb661fda071aee1e642dff9351e636"
-      },
-      {
-        "path": "theme-init.js",
-        "sha256": "9028d47ef9295178d07c4b19042dfb40c76e944e4ce120a80df379ef39f85094"
-      }
-    ]
-  },
-  "note": "Source qualification used an isolated SDK 0.8.49 environment; installation qualification used dependencies actually available from PyPI, including SDK 0.8.48. Commands use normalized relative paths. The wheel and sdist are the exact archives built and installed by the unchanged distribution fixture, not a later rebuild. Archive inspection verifies every runtime file against the candidate, all RECORD hashes, the MIT license and identical bundled browser assets in both archives; no Pro code, private metadata or foreign untracked files are included. The 0.1.3 record, tag and archives remain unchanged. The nested disposable-workspace journey does not complete inside the existing MCP broker environment, while the identical judge passes in the 705-test standalone suite; this record does not claim all publication requirements have native broker attestations. Artifact qualification and external publication are distinct."
+  "note": "Exact archives were installed and tested in non-root Linux without private packages, keys, alternate signing grants or test exclusions. Source bytes, installed runtime and dependencies were unchanged before and after qualification. Both distributions exclude Pro. READ R1 and all HISTORY requirements are natively attested; the full READ R6 selection also passed in the qualified public SDK environment, but its historical verify-only ledger rebind remains stale under the older local host SDK and is not declared closed. These installed archive observations do not declare PyPI publication, Windows qualification, live Cowork business acceptance or new browser controls. Historical publication commits, tags and archives remain immutable."
 }
