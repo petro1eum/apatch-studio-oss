@@ -24,6 +24,10 @@ Provide one standalone public Studio client over the public APatch governed
 runtime. Cowork is an optional connected surface and cannot fork or weaken local
 runtime semantics. No organization control-plane implementation is distributed.
 
+The owner-approved 0.1.5 intake candidate requires exactly the declared public
+SDK dependency `apatch[mcp]>=0.8.50`; historical releases retain their original
+`apatch[mcp]>=0.8.45` declaration. This does not add a private SDK or Pro runtime.
+
 (verify: python3 -m pytest tests/test_contracts.py::test_product_boundary -q)
 
 ## R2 Loopback request boundary
@@ -74,5 +78,12 @@ APatch workspace through the authenticated API.
 Assert the API contains no arbitrary command, shell, MCP relay, direct mutation,
 rollback or session-capability endpoint. RFP-002 may add only its enumerated
 fixed-purpose run operations.
+
+RFP-050-OSS-CONTRACT-INTAKE-PORT adds exactly GET/POST
+`/api/v1/contract-intake/{spec_id}` and POST
+`/api/v1/contract-intake/{spec_id}/approve` for the existing native review and
+owner-approved preparation transaction. Existing session/origin guards apply.
+Preparation never grants execution authority. No other endpoint, HTTP method,
+arbitrary command, shell, MCP relay or historical authoring route is admitted.
 
 (verify: python3 -m pytest tests/test_contracts.py::test_api_is_fixed_purpose_without_shell_or_mcp_relay -q)
