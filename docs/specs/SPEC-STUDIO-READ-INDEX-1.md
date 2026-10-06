@@ -84,5 +84,5 @@ No disk copy of the ledger is created. The UI polls while indexing and shows
 the indexing/failure state. Existing request guards, safe projection and
 coverage regressions remain intact.
 
-(verify: python3 -m pytest tests/read_model/test_read_index.py tests/test_security.py tests/test_projection.py tests/closure/test_stale_projection.py -q)
+(verify: .venv/verification-0.8.50/bin/python -m pytest tests/read_model/test_read_index.py tests/test_security.py tests/test_projection.py tests/closure/test_stale_projection.py -q)
 

@@ -70,7 +70,7 @@ The record version must equal package metadata; placeholder or mutable identifie
 fail the gate. The release gate also exercises real-workspace adapter and API smoke
 paths without depending on a checkout directory name or a sibling repository.
 
-(verify: python3 -m pytest tests/oss_publication/test_release_evidence.py tests/test_adapter.py::test_adapter_reads_real_apatch_workspace tests/test_api.py::test_authenticated_real_workspace_smoke -q)
+(verify: .venv/verification-0.8.50/bin/python -m pytest tests/oss_publication/test_release_evidence.py tests/test_adapter.py::test_adapter_reads_real_apatch_workspace tests/test_api.py::test_authenticated_real_workspace_smoke -q)
 
 ## R10 Governed next-version candidate
 
