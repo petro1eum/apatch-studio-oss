@@ -694,7 +694,84 @@ class SddWorkflowFacade:
             raise SddWorkflowError("The requirement id is invalid", code="invalid_requirement_id", status_code=422)
         return spec_id, requirement_id
 
+    def _approved_successor(self, spec_id: str) -> dict[str, Any] | None:
+        from apatch_studio.contract_recovery import approved_successor
+        return approved_successor(self.root, spec_id)
+
+    def _resume_successor(
+        self, spec_id: str, requirement_id: str, *, owner: str,
+        expected_snapshot: str | None,
+    ) -> dict[str, Any]:
+        from apatch.runtime.atomic_io import exclusive_file_lock
+        from apatch.sdd_judge_amendment import _idle
+        from apatch.trustchain_helper import TrustChainHelper
+
+        lock = self.root / ".apatch/sdd/successor-activation"
+        check_target(lock)
+        check_target(lock.with_suffix(".lock"))
+        with exclusive_file_lock(str(lock)):
+            try:
+                _idle(self.root)
+            except ValueError as exc:
+                raise SddWorkflowError("Finish the active governed work before resuming",
+                                       code="sdd_recovery_busy") from exc
+            selected = self._approved_successor(spec_id)
+            if selected is None:
+                raise SddWorkflowError("The approved successor changed", code="sdd_approval_drift")
+            contract, envelopes = selected["contract"], selected["envelopes"]
+            if owner != contract.get("authority", {}).get("actor_id"):
+                raise SddWorkflowError("Only the original frozen owner may resume this contract",
+                                       code="sdd_owner_required")
+            package, _request, _envelope = self._prepared(spec_id, requirement_id)
+            snapshot = self._snapshot_of_preparation(package, spec_id, requirement_id)
+            if expected_snapshot is None or snapshot != expected_snapshot:
+                raise SddWorkflowError("Review the exact approved successor before resuming",
+                                       code="sdd_approval_drift")
+            envelope = envelopes.get(requirement_id)
+            if envelope is None:
+                raise SddWorkflowError("This approved successor has no selected requirement",
+                                       code="sdd_requirement_not_prepared")
+            current = _core().load_profile_contract(self.root)
+            paths = [self._envelope_path(spec_id, rid) for rid in envelopes]
+            for path in [*paths, self.root / ".apatch/sdd_verification_contract.json"]:
+                check_target(path)
+            payload = {
+                "schema": "apatch.sdd.contract-resume.v1", "authority_id": owner,
+                "spec_id": spec_id, "requirement_id": requirement_id,
+                "contract_hash": contract["document_hash"],
+                "previous_contract_hash": current["document_hash"] if current else None,
+                "envelope_hashes": {rid: value["document_hash"] for rid, value in envelopes.items()},
+                "approval_snapshot": snapshot, "functional_acceptance": False,
+            }
+            tc = TrustChainHelper(str(self.root), auto_init=False)
+            if not tc.has_trustchain() or not tc.commit_action(
+                    "apatch_sdd_contract_resume", {**payload, "stage": "approved"}):
+                raise SddWorkflowError("The owner resume approval could not be signed",
+                                       code="sdd_contract_invalid")
+            from apatch.external_dependency import _signed_rows
+            if not any(all(row["payload"].get(key) == value for key, value in
+                           {**payload, "stage": "approved"}.items())
+                       for row in _signed_rows(self.root, tool_ids={"apatch_sdd_contract_resume"})):
+                raise SddWorkflowError("The resume signature could not be independently verified",
+                                       code="sdd_contract_invalid")
+            if (self.approval_snapshot(spec_id, requirement_id) != snapshot
+                    or _core().load_profile_contract(self.root) != current):
+                raise SddWorkflowError("The reviewed successor changed during approval",
+                                       code="sdd_approval_drift")
+            for rid, value in envelopes.items():
+                _atomic_json(self._envelope_path(spec_id, rid), value)
+            _atomic_json(self.root / ".apatch/sdd_verification_contract.json", contract)
+            self._drop_superseded_envelopes(spec_id, contract["document_hash"])
+            return {**self._review_projection(
+                package, contract, envelope, status="frozen",
+                contract_hash=contract["document_hash"], envelope_hash=envelope["document_hash"],
+                owner_actor_id=owner, frozen_at=str(contract.get("frozen_at") or ""),
+            ), "resumed_from_approval": contract["document_hash"]}
+
     def _prepared_path(self, spec_id: str) -> Path:
+        selected = self._approved_successor(spec_id)
+        if selected is not None:
+            return self.root / selected["contract"]["candidate_path"]
         # A promoted candidate is selected by the sealed active Core contract,
         # never by a caller-provided pointer or by overwriting the original draft.
         try:
@@ -858,6 +935,20 @@ class SddWorkflowFacade:
         prepared: tuple[dict[str, Any], dict[str, Any], dict[str, Any]],
     ) -> dict[str, Any]:
         package, contract_request, prepared_envelope = prepared
+        selected = self._approved_successor(spec_id)
+        if selected is not None:
+            contract = selected["contract"]
+            envelope = selected["envelopes"].get(requirement_id)
+            if envelope is None:
+                raise SddWorkflowError("This successor has no selected task envelope",
+                                       code="sdd_requirement_not_prepared")
+            active = _core().load_profile_contract(self.root)
+            return {**self._review_projection(
+                package, contract, envelope, status="frozen" if active == contract else "ready_for_owner",
+                contract_hash=contract["document_hash"], envelope_hash=envelope["document_hash"],
+                owner_actor_id=str(contract["authority"]["actor_id"]),
+                frozen_at=str(contract.get("frozen_at") or ""),
+            ), "resumed_from_approval": contract["document_hash"]}
         manifest_path = self.root / ".apatch" / "sdd_verification_contract.json"
         envelope_path = self._envelope_path(spec_id, requirement_id)
         if manifest_path.is_file() and envelope_path.is_file():
@@ -1154,10 +1245,17 @@ class SddWorkflowFacade:
                 if len(files) >= 4096 or total_bytes > 64 * 1024 * 1024:
                     raise SddWorkflowError("Narrow the reviewed input scope", code="sdd_contract_invalid", status_code=422)
                 files[relative] = _sha256_file(path)
+        selected = self._approved_successor(spec_id)
+        recovery = {} if selected is None else {
+            "approved_successor": {
+                "contract_hash": selected["contract"]["document_hash"],
+                "envelope_hashes": {rid: value["document_hash"] for rid, value in selected["envelopes"].items()},
+            },
+        }
         return _core().canonical_hash({
             "schema": "apatch.studio.approval-snapshot.v2",
             "spec_id": spec_id, "requirement_id": requirement_id,
-            "preparation": package, "files": files,
+            "preparation": package, "files": files, **recovery,
         })
 
     def freeze_requirement(self, spec_id: str, requirement_id: str, *, owner_actor_id: str, confirmed: bool, expected_snapshot: str | None = None) -> dict[str, Any]:
@@ -1205,6 +1303,9 @@ class SddWorkflowFacade:
                 if expected_snapshot is not None and self.approval_snapshot(spec_id, requirement_id) != expected_snapshot:
                     raise SddWorkflowError("The reviewed task changed during freezing", code="sdd_approval_drift")
                 return review
+            if self._approved_successor(spec_id) is not None:
+                return self._resume_successor(spec_id, requirement_id, owner=owner,
+                                              expected_snapshot=expected_snapshot)
             frozen_at = self._existing_frozen_at(contract_request) or self.clock()
             core_contract = self._freeze_input(
                 package, contract_request, owner=owner, frozen_at=frozen_at,

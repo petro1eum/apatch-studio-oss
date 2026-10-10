@@ -1,0 +1,47 @@
+{
+  "base_archive_sha256": "sha256:8cb05a0e06431f2b2194e6a857d24a5c929ffdf5968790c82fb6b07a53f8cbd5",
+  "base_commit": "20194f914381dbf4bcbf2da61022b8004bdacb7c",
+  "build_provenance": "After actual native source attestation, build regular whole clean20194 archive plus ONLY independently verified governed new module bytes; exclude unrelated working changes",
+  "candidate_source_sha256": "sha256:cda1a6dfcb604a664917947466bc26cd51bbae3198fbeede75fd7aa788b1676f",
+  "evidence_boundary": "Temporary fixtures prove tooling behavior and genuine SDK signatures; source governance must independently verify every actual new source record against existing public signer before closure. No consumer implementation/deployment/customer acceptance.",
+  "excluded_working_changes": [
+    "apatch_studio/sdd_workflow.py",
+    "tests/authoring/test_core_studio_successor_roundtrip.py",
+    "apatch_studio/contract_recovery.py",
+    "tests/authoring/test_contract_resume.py",
+    ".cursor/"
+  ],
+  "fixture_path": "tests/frozen/fixtures/studio_scope_admin_original_core.v1.json",
+  "fixture_sha256": "sha256:708235632be25eed6f9f3b09200d015f16a7fe8da7b1c16f8adc36909544035c",
+  "forbidden_inputs": [
+    "Dirty Studio working-tree implementation changes",
+    "Other chat worktrees",
+    "Archived dirty Core a8ca018 sources",
+    "New or copied identities, aliases, private keys or manual sealed authority records"
+  ],
+  "judge_path": "tests/frozen/test_native_scope_administration.py",
+  "judge_sha256": "sha256:43259c044ca35846e35210151599759622736f8ca73867282e6c9654dda87b3b",
+  "qualified_runtime": {
+    "canonical_signed_reader_sha256": "sha256:c66fd98b367c6ae8e2ff04692efca3c2f002c8987d3925e88b8d1cd8104e432d",
+    "core_version": "0.8.47",
+    "python": "/var/folders/yb/hvlh1bpd023__hxlxt4p_nx40000gn/T/trustchain-platform-native-runtime-40imkjl6/venv/bin/python",
+    "sdk_version": "3.3",
+    "studio_runtime": "/Users/edcher/Documents/Codex/2026-10-08/ai-trust-completion-review-kp11urdu/extensions/clean-studio-20194f9-20261008T122244Z/runtime-package"
+  },
+  "rfp_id": "RFP-2026100805",
+  "schema": "apatch.studio.scope-admin-source-policy.v1",
+  "source_inputs": [
+    "Exact clean Studio commit archive 20194f914381dbf4bcbf2da61022b8004bdacb7c existing owner, guard, state and native atomic/lease interfaces",
+    "Installed qualified whole Core0.8.47 plus governed canonical public signed-row reader c66fd98b and actual SDK3.3",
+    "Reviewed exact outside candidate and pre-existing unchanged independent executable judge",
+    "Pinned authentic original Core R6 public snapshot used only in disposable fixture; never imported as real workspace authority"
+  ],
+  "source_signer": {
+    "agent_id": "apatch-edcher-prod",
+    "public_key_sha256": "236d89dc1c5ca6c8334933b86bd2c6a6ec452b995a2c03403ab06601bd3d12c5"
+  },
+  "spec_id": "SPEC-STUDIO-SCOPE-COLLISION-ADMIN-1",
+  "write_allowlist": [
+    "apatch_studio/scope_admin_workflow.py"
+  ]
+}

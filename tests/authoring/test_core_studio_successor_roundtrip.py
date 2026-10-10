@@ -52,6 +52,17 @@ def author(root, old, grant_hash, files, monkeypatch, *, replace=False):
 
 def test_real_signed_revision_owner_activation_and_receipt_gap(tmp_path, monkeypatch):
     from apatch.sdd_integrity import canonical_hash
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, NoEncryption
+    key = tmp_path / "successor-key.pem"
+    key.write_bytes(Ed25519PrivateKey.generate().private_bytes(
+        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+    monkeypatch.setenv("APATCH_AGENT_ID", "successor-roundtrip-fixture")
+    monkeypatch.setenv("APATCH_AGENT_KEY", str(key))
+    monkeypatch.setenv("APATCH_KEY_BACKEND", "pem")
+    for name in ("APATCH_CANONICAL_RUNTIME", "APATCH_AGENT_SIGN_CMD",
+                 "APATCH_AGENT_PUBKEY", "APATCH_AGENT_CERT"):
+        monkeypatch.delenv(name, raising=False)
     canonical = fixtures._write_prepared(tmp_path)
     canonical_bytes = canonical.read_bytes()
     judge_bytes = (tmp_path / "tests/test_feature.py").read_bytes()
