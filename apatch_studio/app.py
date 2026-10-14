@@ -85,6 +85,7 @@ from apatch_studio.judge_amendment_workflow import JudgeAmendmentWorkflow, Judge
 from apatch_studio.document_publication_workflow import install_routes as install_document_publication_routes
 from apatch_studio.ownership_handoff_workflow import install_routes as install_ownership_handoff_routes
 from apatch_studio.contract_intake_workflow import install_routes as install_contract_intake_routes
+from apatch_studio.intake_recovery_workflow import install_routes as install_intake_recovery_routes
 
 
 def _frontend_root() -> Path:
@@ -733,6 +734,7 @@ def create_app(
     install_document_publication_routes(app, workspace, identity_root=identity_root or default_state_root())
     install_ownership_handoff_routes(app, workspace, identity_root=identity_root or default_state_root())
     install_contract_intake_routes(app, workspace, identity_root=identity_root or default_state_root())
+    install_intake_recovery_routes(app, workspace, identity_root=identity_root or default_state_root())
 
     assets = frontend / "assets"
     if assets.is_dir():
