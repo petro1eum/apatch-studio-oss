@@ -153,6 +153,194 @@ def _execution_intent_summary(
         }
 
 
+def _install_owner_preparation_boundary_routes(app, workspace, lock_authority):
+    """One missing-boundary preparation gate; never an execution grant.
+
+    A completed signed UI5 metadata intake and the existing certified owner are
+    prerequisites. The new boundary only enables the ordinary release/authoring
+    workflow. Existing envelopes, profile, tests and sibling locks are untouched.
+    """
+    import hashlib
+    import json
+    import re
+    from apatch import sdd_contract_intake as native
+    from apatch.sdd_integrity import _verify_seal, canonical_hash, freeze_contract
+    from apatch.spec import parse_spec_file
+    from apatch.spec_ownership import resolve_spec_owned_targets
+    from apatch_studio.contract_intake_workflow import ContractIntakeWorkflow
+
+    root = Path(workspace).resolve()
+
+    def refuse(message):
+        raise SddWorkflowError(message, code="sdd_preparation_boundary_refused", status_code=409)
+
+    def raw(relative):
+        return native._capture(root, relative)
+
+    def digest(data):
+        return "sha256:" + hashlib.sha256(data).hexdigest()
+
+    def state(spec_id, requirement_id):
+        if not re.fullmatch(r"SPEC-[A-Z0-9][A-Z0-9-]{1,95}", spec_id) or requirement_id != "R1":
+            refuse("Only the existing declared R1 preparation boundary is supported")
+        if native._capture(root, f".apatch/sdd/envelopes/{spec_id}/R1.json", optional=True) is not None:
+            refuse("An existing canonical envelope must use its ordinary boundary workflow")
+        if native._capture(root, f".apatch/locks/{spec_id}/R1.json", optional=True) is not None:
+            refuse("An existing lock must use its ordinary release workflow")
+        if lock_authority.status(spec_id, requirement_id).get("state") != "unlocked":
+            refuse("A previous or broken lock boundary must use its ordinary recovery workflow")
+        profile_raw = raw(native.PROFILE)
+        profile = json.loads(profile_raw)
+        _verify_seal(profile, "current preparation boundary owner profile")
+        if freeze_contract(profile) != profile:
+            refuse("The current frozen owner profile is invalid")
+        owner = approver_for(lock_authority.identity_root)
+        if (owner.get("kind") != "machine" or owner.get("certified") is not True
+                or owner.get("id") != profile["authority"]["actor_id"]):
+            refuse("The existing certified profile owner must confirm this boundary")
+        workflow = ContractIntakeWorkflow(root, identity_root=lock_authority.identity_root)
+        intake = workflow.review(spec_id)
+        if intake.get("status") != "prepared" or not isinstance(intake.get("result"), dict):
+            refuse("A genuine completed native owner metadata intake is required")
+        reviewed = intake.get("review") or {}
+        outputs = intake["result"].get("files") or {}
+        if (reviewed.get("active_contract_hash") != profile["document_hash"]
+                or reviewed.get("authority_id") != owner["id"]
+                or reviewed.get("actor_id") == owner["id"]):
+            refuse("The signed metadata intake must bind this current owner and a distinct requester")
+        candidate_path = f".apatch/sdd/prepared/{spec_id}.json"
+        candidate_raw = raw(candidate_path)
+        if outputs.get(candidate_path) != digest(candidate_raw):
+            refuse("Prepared scope is not the exact completed native intake output")
+        package = json.loads(candidate_raw)
+        native._candidate(json.dumps(package), spec_id)
+        request = package["contract_request"]
+        proposed = request.get("obligations") or []
+        old = profile["obligations"]
+        if (request.get("supersedes_hash") != profile["document_hash"]
+                or request.get("baseline_hash") != profile["baseline_hash"]
+                or proposed[:-1] != old or len(proposed) != len(old) + 1):
+            refuse("All current owner obligations and baseline must remain byte-equivalent")
+        gate = proposed[-1]
+        envelope = package["task_envelopes"].get("R1")
+        ref = spec_id + "#R1"
+        if (not isinstance(envelope, dict) or envelope.get("requirement") != ref
+                or gate.get("test_id") != ref or gate.get("material") is not True
+                or envelope.get("checks") != [gate.get("acceptance_id")]
+                or envelope.get("commands") != [gate.get("command")]
+                or gate.get("command_hash") != canonical_hash(gate.get("command"))):
+            refuse("Exactly one immutable material gate must cover the selected R1")
+        assets = gate.get("judge_assets") or []
+        bundle_paths = [item["path"] for item in assets if item["path"].endswith("/ui5-inputs.json")]
+        if len(bundle_paths) != 1:
+            refuse("The approved source-bound UI5 input bundle is required")
+        for asset in assets:
+            if outputs.get(asset["path"]) != asset["sha256"] or digest(raw(asset["path"])) != asset["sha256"]:
+                refuse("Every new judge must be the unchanged completed native intake output")
+        bundle = json.loads(raw(bundle_paths[0]))
+        writes = envelope.get("allowed_writes")
+        if (bundle.get("schema") != "cowork.ui5.source-bound-inputs.v1"
+                or bundle.get("actual_source") != str(root)
+                or bundle.get("original_profile") != profile
+                or bundle.get("source_overlay") is not False
+                or writes != bundle.get("source_paths") or len(writes or []) != 5
+                or len(set(writes)) != 5 or any(envelope.get(name) for name in ("network", "remote", "services", "allowed_symbols"))):
+            refuse("Only the exact five-file source-bound UI5 scope is eligible")
+        for item in old:
+            for asset in item["judge_assets"]:
+                if digest(raw(asset["path"])) != asset["sha256"]:
+                    refuse("A preserved current owner judge changed")
+        original = bundle.get("original_spec") or {}
+        before = original.get("content")
+        if not isinstance(before, str) or hashlib.sha256(before.encode()).hexdigest() != original.get("sha256"):
+            refuse("Original strict requirement bytes are required")
+        spec_path = f"docs/specs/{spec_id}.md"
+        source_row = next((row for row in reviewed.get("files", []) if row.get("path") == spec_path), None)
+        if source_row is None or source_row.get("before_hash") != digest(before.encode()):
+            refuse("The original requirement must be the signed pre-intake source")
+        archive_matches = []
+        for path, pin in reviewed.get("input_hashes", {}).items():
+            if path.startswith(".apatch/sdd/frozen/"):
+                value = json.loads(raw(path))
+                if value.get("spec_hash") == digest(before.encode()):
+                    if digest(raw(path)) != pin or freeze_contract(value) != value or value.get("authority") != profile["authority"]:
+                        refuse("Original requirement authority archive changed or belongs to another owner")
+                    archive_matches.append(path)
+        if not archive_matches:
+            refuse("An existing functional owner archive for this original strict SPEC is required")
+        after = raw(spec_path).decode()
+        if digest(after.encode()) != request.get("spec_hash") or outputs.get(spec_path) != request.get("spec_hash"):
+            refuse("Current SPEC is not the exact owner-approved metadata output")
+        # Keep every sibling block and the original R1 verification command.
+        pattern = r"(?m)^## R1[^\n]*\n"
+        start = re.search(pattern, before)
+        current_start = re.search(pattern, after)
+        if start is None or current_start is None or before[:start.end()] != after[:current_start.end()]:
+            refuse("The original strict SPEC preamble changed")
+        old_tail = before[start.end():]
+        new_tail = after[current_start.end():]
+        old_next = re.search(r"(?m)^## R(?:[2-9]|[1-9][0-9]+)\b", old_tail)
+        new_next = re.search(r"(?m)^## R(?:[2-9]|[1-9][0-9]+)\b", new_tail)
+        if old_next is None or new_next is None or old_tail[old_next.start():] != new_tail[new_next.start():]:
+            refuse("Existing sibling requirements must stay unchanged")
+        old_block, new_block = old_tail[:old_next.start()], new_tail[:new_next.start()]
+        old_owns = re.search(r"(?m)^owns:.*$", old_block)
+        new_owns = re.search(r"(?m)^owns:.*$", new_block)
+        if old_owns is None or new_owns is None:
+            refuse("The original and additive R1 ownership must be explicit")
+        owned = lambda row: {part.strip().strip("`") for part in row.split(":", 1)[1].split(",")}
+        if owned(new_owns.group(0)) != owned(old_owns.group(0)) | set(writes):
+            refuse("Original ownership must remain and only the exact UI5 paths may be added")
+        normalized = new_block.replace(new_owns.group(0), old_owns.group(0), 1)
+        verify = re.search(r"\(verify: ([^\n]+)\)", old_block)
+        if verify is None or not normalized.startswith(old_block.rstrip() + "\n"):
+            refuse("The complete original R1 block and verification command cannot be weakened")
+        test_paths = re.findall(r"(?:src|tests)/[^\s,)]+", verify.group(1))
+        for path in test_paths:
+            pin = (bundle.get("regression_pins") or {}).get(path)
+            if pin is None or hashlib.sha256(raw(path)).hexdigest() != pin:
+                refuse("The original R1 executable judge must remain immutable")
+        parsed = parse_spec_file(str(root / spec_path))
+        if parsed.id != spec_id or not parsed.strict_ownership:
+            refuse("Strict existing SPEC ownership is mandatory")
+        resolved = resolve_spec_owned_targets(str(root), [{"target_file": path, "action": "replace" if (root/path).exists() else "create"} for path in writes])
+        if not resolved.get("ok") or any({row.get("requirement") for row in resolved.get("owned", []) if row.get("path") == path} != {ref} for path in writes):
+            refuse("Each UI5 path must belong only to this declared R1")
+        protected = reviewed["input_hashes"]
+        subject = {"schema": "apatch.studio.owner-preparation-boundary.v1", "requirement": ref,
+            "owner": owner["id"], "profile_raw_hash": digest(profile_raw), "profile": profile["document_hash"],
+            "native_intake_snapshot": reviewed["document_hash"], "candidate_hash": digest(candidate_raw),
+            "source_scope": writes, "original_requirement_sha256": original["sha256"],
+            "protected_authority_inputs": protected, "original_judge_pins": bundle["regression_pins"],
+            "preparation_only": True, "implementation_allowed": False, "functional_acceptance": False}
+        return {**subject, "snapshot": canonical_hash(subject)}
+
+    route = "/api/v1/specs/{spec_id}/requirements/{requirement_id}/preparation-boundary"
+
+    @app.get(route)
+    def review_preparation_boundary(spec_id: str, requirement_id: str):
+        return state(spec_id, requirement_id)
+
+    @app.post(route + "/approve")
+    def approve_preparation_boundary(spec_id: str, requirement_id: str, request: AuthoringApprovalRequest):
+        from apatch import sdd_draft_amendment as draft
+        try:
+            # Same interprocess boundary and pending-transaction guard as the
+            # normal freeze route; every input/owner/snapshot is re-read inside.
+            with draft.freeze_lock(root):
+                draft.assert_can_freeze(root)
+                selected = state(spec_id, requirement_id)
+                if request.snapshot != selected["snapshot"]:
+                    refuse("Review the exact current preparation-only scope before confirmation")
+                # Restrictive lock only: no grant, envelope, signing or Source.
+                lock_authority.lock_solo(spec_id, requirement_id)
+        except (ValueError, OSError) as exc:
+            refuse("Complete or recover the pending owner transaction before preparation: " + str(exc))
+        return {"status": "preparation_boundary_locked", "snapshot": selected["snapshot"],
+            "lock": lock_authority.view(spec_id, requirement_id), "preparation_only": True,
+            "implementation_allowed": False, "functional_acceptance": False,
+            "next_action": "Use the normal release request/answer and authoring workflow"}
+
 def create_app(
     workspace: str,
     *,
@@ -819,6 +1007,7 @@ def create_app(
     install_document_publication_routes(app, workspace, identity_root=identity_root or default_state_root())
     install_ownership_handoff_routes(app, workspace, identity_root=identity_root or default_state_root())
     install_contract_intake_routes(app, workspace, identity_root=identity_root or default_state_root())
+    _install_owner_preparation_boundary_routes(app, workspace, lock_authority)
 
     assets = frontend / "assets"
     if assets.is_dir():
