@@ -333,6 +333,8 @@ class ExecutionIntentManager:
         self.governed_work_gateway = (
             governed_work_gateway or APatchGovernedWorkGateway(self.workspace)
         )
+        if hasattr(run_manager, "configure_external_dispatch_guard"):
+            run_manager.configure_external_dispatch_guard(self.governed_work_gateway.guard_execution)
         self._reconcile_inflight()
 
     @property
@@ -515,7 +517,7 @@ class ExecutionIntentManager:
                 code="cowork_requires_existing_spec",
                 status_code=409,
             )
-        if cowork_required and not connected and not already_bound:
+        if cowork_required and not connected:
             raise ExecutionIntentError(
                 "Cowork connection is required before accepting this assignment",
                 code="cowork_connection_required",
@@ -540,7 +542,7 @@ class ExecutionIntentManager:
             return dict(record)
 
         record = self.store.update(begin)
-        if cowork_required and not already_bound:
+        if cowork_required:
             try:
                 raw = self.store.load_envelope(intent_id)
                 if _sha256(raw) != record["envelope_hash"]:
@@ -556,8 +558,8 @@ class ExecutionIntentManager:
                 self._restore_pending(intent_id, cowork_status="acceptance_failed")
                 raise ExecutionIntentError(
                     "Cowork acceptance or source binding was not acknowledged",
-                    code="cowork_acceptance_incomplete",
-                    status_code=502,
+                    code=getattr(exc, "code", "cowork_acceptance_incomplete"),
+                    status_code=409 if getattr(exc, "code", None) == "exact_contract_required" else 502,
                 ) from exc
 
             bound_at = self._utc_now().isoformat()

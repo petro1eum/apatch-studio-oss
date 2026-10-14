@@ -32,6 +32,25 @@ def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     contract = view.get("contract")
     if not isinstance(contract, Mapping):
         return view
+    environment = contract.get("judge_environment")
+    if environment is not None:
+        # Private guard projection only. A validated local content seal is not
+        # a person's consent or an external execution authority.
+        try:
+            from apatch.sdd_integrity import issue_capability, canonical_hash
+            issue_capability(
+                value["contract"], value["task_envelope"],
+                actor_id=value["actor_id"], role="implementation",
+            )
+            if (not isinstance(environment, Mapping) or set(environment) != {"cwd", "env"}
+                    or not isinstance(environment["cwd"], str) or not isinstance(environment["env"], Mapping)
+                    or not all(isinstance(k, str) and isinstance(v, str) for k, v in environment["env"].items())):
+                raise ValueError("private judge setup shape is invalid")
+            digest = canonical_hash(environment)
+        except (ImportError, KeyError, RuntimeError, ValueError) as exc:
+            raise UnsafeProjectionError("invalid private SDD judge setup") from exc
+        contract.pop("judge_environment")
+        contract["judge_setup_hash"] = digest
     amendment = contract.get("judge_amendment")
     bootstrap = amendment.get("bootstrap") if isinstance(amendment, Mapping) else None
     if not isinstance(bootstrap, Mapping) or bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap":
@@ -39,8 +58,8 @@ def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     try:
         from apatch.sdd_integrity import issue_capability
         issue_capability(
-            contract, view["task_envelope"],
-            actor_id=view["actor_id"], role="implementation",
+            value["contract"], value["task_envelope"],
+            actor_id=value["actor_id"], role="implementation",
         )
     except (ImportError, KeyError, RuntimeError, ValueError) as exc:
         raise UnsafeProjectionError("invalid private SDD archive binding") from exc

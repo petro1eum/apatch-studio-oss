@@ -350,6 +350,7 @@ def build_governed_prompt(
     retry: bool = False,
     execution_context: ExecutionContext | None = None,
     sdd_execution: SddExecutionContext | None = None,
+    source_binding_context=None,
     studio_run_id: str | None = None,
     planning_contract_run_id: str | None = None,
     planning_context: str | None = None,
@@ -416,6 +417,14 @@ def build_governed_prompt(
             ]
         )
 
+    if source_binding_context is not None:
+        common.extend([
+            'This explicit full-delivery run has two independently signed authority receipts joined by the same Change.',
+            'source_binding_artifacts_json=' + json.dumps(list(source_binding_context.artifacts),separators=(',',':')),
+            'Pass that exact artifacts array to native apatch_session_start before any mutation.',
+            'Preserve it in the signed native attestation and ContributionEvent; absent or changed artifacts make delivery unqualified.',
+            'Native success is evidence only, never customer acceptance.',
+        ])
     if sdd_execution is not None:
         from apatch.sdd_integrity import canonical_json
 
@@ -796,6 +805,7 @@ class AgentRunManager:
             lambda run_id: cleanup_planning_session(root, run_id)
         )
         self._popen = popen
+        self._external_dispatch_guard = None
         self._review_collector = review_collector or WorkspaceReviewCollector(root).capture
         self._plan_handoff_collector = plan_handoff_collector or PlanHandoffCollector(root)
         self._scope_baseline_collector = scope_baseline_collector or (
@@ -859,6 +869,31 @@ class AgentRunManager:
                 visited.add(cursor.run_id)
             return cursor.run_id
 
+    def configure_external_dispatch_guard(self, guard):
+        if not callable(guard):
+            raise ValueError("external dispatch guard must be callable")
+        with self._lock:
+            if any(record.status not in _TERMINAL for record in self._runs.values()):
+                raise RunStateError("cannot replace the external guard while work is active")
+            self._external_dispatch_guard = guard
+
+    def _guard_external_dispatch(self, request, context, sdd_execution, *, stage):
+        if context is not None:
+            if self._external_dispatch_guard is None:
+                raise RunStateError("external work requires a current canonical acknowledgement")
+            result = self._external_dispatch_guard(request, context, sdd_execution, stage=stage)
+            if result is not None:
+                from apatch_studio.exact_contract_delivery import SourceBoundExecutionContext
+                result = SourceBoundExecutionContext.model_validate(result)
+                if (sdd_execution is None or result.requirement != sdd_execution.spec_id + '#' + sdd_execution.requirement_id
+                        or result.contract_hash != sdd_execution.contract_hash
+                        or result.task_envelope_hash != sdd_execution.envelope_hash
+                        or result.tenant_id != context.tenant_id
+                        or result.project_group_id != context.project_group_id
+                        or result.work_item_id != context.work_item_id):
+                    raise RunStateError('full-delivery authority context differs from the selected exact run')
+                return result
+
     def start(
         self,
         request: AgentRunRequest,
@@ -870,6 +905,7 @@ class AgentRunManager:
         if sdd_execution is not None and not isinstance(sdd_execution, SddExecutionContext):
             sdd_execution = SddExecutionContext.model_validate(sdd_execution)
         self._runner_command(request)
+        self._guard_external_dispatch(request, execution_context, sdd_execution, stage="start")
         with self._lock:
             if self._closed:
                 raise RunStateError("run manager is closed")
@@ -1154,11 +1190,14 @@ class AgentRunManager:
                 if planning_contract_run_id is not None
                 else None
             )
+            source_binding_context = self._guard_external_dispatch(
+                record.request,record.execution_context,record.sdd_execution,stage='pre_popen')
             prompt = build_governed_prompt(
                 record.request,
                 retry=record.retry_of is not None,
                 execution_context=record.execution_context,
                 sdd_execution=record.sdd_execution,
+                source_binding_context=source_binding_context,
                 studio_run_id=(record.run_id if record.request.mode == "new_change" else None),
                 planning_contract_run_id=planning_contract_run_id,
                 planning_context=planning_context,

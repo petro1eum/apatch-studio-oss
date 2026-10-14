@@ -25,6 +25,7 @@ import {
   runWorkspaceAction,
 } from "./api";
 import { ActionResultView } from "./OutsideInViews";
+import { ExactContractDeliveryInbox } from "./ExactContractDeliveryInbox";
 import type { ConfirmRequest } from "./OutsideInViews";
 import type {
   ActionReceipt,
@@ -282,6 +283,7 @@ export function InboxView({
 
   return <div className="oi-page">
     <header className="oi-page-header"><div><span>Signed requests</span><h1>Inbox</h1><p>{items.filter((item) => item.can_confirm).length} ready</p></div></header>
+    <ExactContractDeliveryInbox data={data} runners={runners} onChanged={onChanged} />
     <div className="oi-list">{items.map((item) => <article className="oi-list-row oi-request-row" key={item.intent_id}>
       <UserRoundCheck size={18} />
       <div><strong>{item.objective}</strong><span>{item.acceptance_criteria.length} acceptance checks · expires {new Date(item.expires_at).toLocaleString()}</span></div>
