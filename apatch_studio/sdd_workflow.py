@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from apatch_studio.change_details import change_id_for_session
-from apatch_studio.projection import assert_projection_safe
+from apatch_studio.projection import assert_projection_safe, private_sdd_projection
 from apatch_studio.state_io import StateDirectory, check_target, read_json, write_json
 
 _REQUIRED_PERSPECTIVES = frozenset({"positive", "negative", "boundary", "regression"})
@@ -695,6 +695,34 @@ class SddWorkflowFacade:
         return spec_id, requirement_id
 
     def _prepared_path(self, spec_id: str) -> Path:
+        # A promoted candidate is selected by the sealed active Core contract,
+        # never by a caller-provided pointer or by overwriting the original draft.
+        try:
+            active = read_json(self.root / ".apatch/sdd_verification_contract.json", limit=_MAX_PREPARED_BYTES)
+        except FileNotFoundError:
+            active = None
+        except (OSError, ValueError) as exc:
+            raise SddWorkflowError("The active contract is unavailable", code="sdd_contract_invalid") from exc
+        if isinstance(active, Mapping) and active.get("candidate_path"):
+            relative = str(active["candidate_path"])
+            if (active.get("schema") != "apatch.sdd.verification-contract.v1"
+                    or active.get("status") != "frozen"
+                    or active.get("document_hash") != _core().canonical_hash({key: value for key, value in active.items() if key != "document_hash"})
+                    or not relative.startswith(".apatch/sdd/prepared/")
+                    or ".." in Path(relative).parts or Path(relative).is_absolute()):
+                raise SddWorkflowError("The successor candidate binding is invalid", code="sdd_contract_tampered")
+            path = self.root / relative
+            try:
+                with StateDirectory(path.parent) as directory:
+                    data = directory.read_bytes(path.name, limit=_MAX_PREPARED_BYTES)
+                import json
+                package = json.loads(data)
+                if "sha256:" + hashlib.sha256(data).hexdigest() != active.get("candidate_hash"):
+                    raise ValueError("candidate bytes changed")
+                if package.get("spec_id") == spec_id:
+                    return path
+            except (OSError, ValueError, AttributeError) as exc:
+                raise SddWorkflowError("The approved successor candidate changed", code="sdd_contract_tampered") from exc
         return self.root / ".apatch" / "sdd" / "prepared" / f"{spec_id}.json"
 
     def _envelope_path(self, spec_id: str, requirement_id: str) -> Path:
@@ -836,9 +864,40 @@ class SddWorkflowFacade:
             try:
                 binding = self.execution_binding(spec_id, requirement_id, actor_id="agent:review")
             except SddWorkflowError:
+                if self._prepared_path(spec_id) != self.root / ".apatch/sdd/prepared" / f"{spec_id}.json":
+                    raise
                 pass
             else:
                 contract = binding["contract"]
+                if contract.get("candidate_path"):
+                    # Core already froze the selected candidate while retaining
+                    # predecessor obligations. Rewriting every approver here
+                    # would erase that lineage and manufacture a false drift.
+                    pins = {asset["path"] for item in contract.get("obligations", []) for asset in item.get("judge_assets", [])}
+                    # A signed owner amendment may correct only duplicate pytest
+                    # conftest loading. The original immutable preparation remains
+                    # history; no scope, checks, tests or arbitrary argv are relaxed.
+                    bootstrap = (contract.get("judge_amendment") or {}).get("bootstrap")
+                    expected_commands = prepared_envelope.get("commands", [])
+                    if bootstrap:
+                        old, new = bootstrap.get("old_command"), bootstrap.get("new_command")
+                        if (bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap"
+                            or not isinstance(old, list) or new != [*old, "--noconftest"]
+                            or contract.get("spec_hash") != bootstrap.get("new_spec_hash")):
+                            raise SddWorkflowError("The owner bootstrap amendment is invalid", code="sdd_approval_drift")
+                        expected_commands = [new if command == old else command for command in expected_commands]
+                    expected = _core().validate_task_envelope({
+                        **prepared_envelope, "commands": expected_commands, "contract_hash": contract["document_hash"],
+                        "forbidden_paths": sorted(set(prepared_envelope.get("forbidden_paths", [])) | pins | {".apatch/**", ".trustchain/**", ".git/**"}),
+                    })
+                    if expected["document_hash"] != binding["envelope_hash"]:
+                        raise SddWorkflowError("The successor task envelope changed", code="sdd_approval_drift")
+                    return self._review_projection(
+                        package, contract, binding["task_envelope"], status="frozen",
+                        contract_hash=binding["contract_hash"], envelope_hash=binding["envelope_hash"],
+                        owner_actor_id=str((contract.get("authority") or {}).get("actor_id") or ""),
+                        frozen_at=str(contract.get("frozen_at") or ""),
+                    )
                 try:
                     candidate = _core().freeze_contract(self._freeze_input(
                         package, contract_request,
@@ -1197,7 +1256,7 @@ class SddWorkflowFacade:
             "contract": contract,
             "task_envelope": task_envelope,
         }
-        assert_projection_safe(result)
+        assert_projection_safe(private_sdd_projection(result))
         return result
 
     @staticmethod
