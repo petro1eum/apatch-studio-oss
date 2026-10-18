@@ -1,0 +1,20 @@
+{
+  "schema": "apatch.studio.intake-source-binding.v1",
+  "version": "0.1.5",
+  "requirement": "SPEC-STUDIO-CONTRACT-INTAKE-1#R5",
+  "source_commit": "f3c32bad0a5df3064584ed5574089a899f6ad373",
+  "files": [
+    {
+      "path": "apatch_studio/app.py",
+      "sha256": "c4d7e7fb222295783618728e1c2c4ff92543c364f11402e63c326658e84d2935"
+    },
+    {
+      "path": "apatch_studio/authoring_workflow.py",
+      "sha256": "2ebd494fcc581ac71fdb446498d2cca3d1ae1be43fbe80f8097436817b2d468b"
+    },
+    {
+      "path": "apatch_studio/contract_intake_workflow.py",
+      "sha256": "5dbb716f1cfd07f3262a8c0c57f60565beef7ad5fc9b5a3f239a29aad35fa92d"
+    }
+  ]
+}

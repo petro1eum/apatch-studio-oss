@@ -106,6 +106,14 @@ not installed runtime acceptance, new UI, HOST admission or business acceptance.
 Actual wheel/sdist, installed application and publication stay under R2/R3/R9.
 No candidate or prepared test package is evidence of an upload.
 
+For version 0.1.6, the prior published version is 0.1.5. The stabilization
+export binds all ten changed package/version paths in
+`release/stabilization-source-binding.json` to the same exact source commit and
+current bytes. The primary file is `apatch_studio/app.py`; SDK dependency is
+`apatch[mcp]>=0.8.51`. Historical candidate readers and their negative checks
+remain unchanged. This R10 binding is release preparation, not attestation or
+publication proof; R9 still requires actual signed source and exact artifacts.
+
 (verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py)
 
 ## Traceability

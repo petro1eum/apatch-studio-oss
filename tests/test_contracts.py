@@ -18,7 +18,7 @@ def test_product_boundary():
 
     assert project["license"] == "MIT"
     assert project["description"] == "Local contract-driven workspace for governing AI-agent work with APatch and TrustChain Cowork"
-    expected_sdk = "apatch[mcp]>=0.8.50" if project["version"] == "0.1.5" else "apatch[mcp]>=0.8.45"
+    expected_sdk = "apatch[mcp]>=0.8.51" if project["version"] == "0.1.6" else "apatch[mcp]>=0.8.50" if project["version"] == "0.1.5" else "apatch[mcp]>=0.8.45"
     assert expected_sdk in project["dependencies"]
     assert "apatch studio oss" in readme
     assert "organization control plane" in readme
@@ -59,7 +59,7 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         for method in getattr(route, "methods", set())
         if route.path.startswith("/api/")
     }
-    assert routes == {
+    expected_routes = {
         ("/api/v1/health", "GET"),
         ("/api/v1/overview", "GET"),
         ("/api/v1/refresh", "POST"),
@@ -113,6 +113,22 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         ("/api/v1/contract-intake/{spec_id}", "POST"),
         ("/api/v1/contract-intake/{spec_id}/approve", "POST"),
     }
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    if project["version"] == "0.1.6":
+        expected_routes |= {
+            ("/api/v1/specs/{spec_id}/document-publication", "GET"),
+            ("/api/v1/specs/{spec_id}/document-publication", "POST"),
+            ("/api/v1/specs/{spec_id}/document-publication/approve", "POST"),
+            ("/api/v1/specs/{spec_id}/ownership-handoff", "GET"),
+            ("/api/v1/specs/{spec_id}/ownership-handoff", "POST"),
+            ("/api/v1/specs/{spec_id}/ownership-handoff/approve", "POST"),
+        }
+    if project["version"] == "0.1.6":
+        expected_routes |= {
+            ("/api/v1/contract-intake/{spec_id}/recovery", "GET"),
+            ("/api/v1/contract-intake/{spec_id}/recovery/cancel", "POST"),
+        }
+    assert routes == expected_routes
     assert not {method for _path, method in routes}.intersection({"PUT", "PATCH", "DELETE"})
     forbidden_terms = {
         "apply",

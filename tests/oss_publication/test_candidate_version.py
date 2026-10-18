@@ -18,7 +18,9 @@ _REQUIREMENTS = {
     "0.1.3": "SPEC-STUDIO-INTERACTIVE-CHANGE-1#R2",
     "0.1.4": "SPEC-STUDIO-READ-INDEX-1#R1",
     "0.1.5": "SPEC-STUDIO-CONTRACT-INTAKE-1#R5",
+    "0.1.6": "SPEC-STUDIO-OSS-PUBLICATION-1#R10",
 }
+_STABILIZATION_FILES = ('apatch_studio/__init__.py', 'apatch_studio/app.py', 'apatch_studio/document_publication_workflow.py', 'apatch_studio/envelope_tool_amendment_workflow.py', 'apatch_studio/intake_recovery_workflow.py', 'apatch_studio/ownership_handoff_workflow.py', 'apatch_studio/projection.py', 'apatch_studio/run_store.py', 'apatch_studio/sdd_workflow.py', 'pyproject.toml')
 _UI_FILES = ("frontend/src/ChangeDetailView.tsx", "frontend/src/outside-in.css")
 _INTAKE_FILES = (
     "apatch_studio/app.py",
@@ -72,7 +74,8 @@ def _assert_candidate_binding(root: Path) -> None:
     _git(root, "merge-base", "--is-ancestor", commit, "HEAD")
     source_file = candidate["source_file"]
     expected_file = (
-        "apatch_studio/contract_intake_workflow.py" if candidate["version"] == "0.1.5"
+        "apatch_studio/app.py" if candidate["version"] == "0.1.6"
+        else "apatch_studio/contract_intake_workflow.py" if candidate["version"] == "0.1.5"
         else "apatch_studio/read_index.py" if candidate["version"] == "0.1.4"
         else _UI_FILES[0] if candidate["version"] == "0.1.3"
         else "apatch_studio/result_delivery.py"
@@ -100,6 +103,8 @@ def _assert_candidate_binding(root: Path) -> None:
         _assert_incremental_binding(root, candidate)
     if candidate["version"] == "0.1.5":
         _assert_intake_binding(root, candidate)
+    if candidate["version"] == "0.1.6":
+        _assert_stabilization_binding(root, candidate)
 
 
 def test_governed_candidate_version_is_exact_and_advances() -> None:
@@ -481,4 +486,81 @@ def test_intake_candidate_rejects_inexact_binding(
     if failure != "missing_binding":
         _write_json(binding_path, binding)
     with pytest.raises((AssertionError, FileNotFoundError)):
+        _assert_candidate_binding(root)
+
+
+def _assert_stabilization_binding(root: Path, candidate: dict[str, object]) -> None:
+    """Preparation-only release binding; no owner consent or HOST admission."""
+    assert candidate["previous_published_version"] == "0.1.5"
+    project = tomllib.loads((root / "pyproject.toml").read_text())["project"]
+    assert "apatch[mcp]>=0.8.51" in project.get("dependencies", [])
+    binding = json.loads(
+        (root / "release/stabilization-source-binding.json").read_text(encoding="utf-8")
+    )
+    assert set(binding) == {"schema", "version", "requirement", "source_commit", "files"}
+    assert binding["schema"] == "apatch.studio.stabilization-source-binding.v1"
+    for field in ("version", "requirement", "source_commit"):
+        assert binding[field] == candidate[field]
+    assert [entry["path"] for entry in binding["files"]] == list(_STABILIZATION_FILES)
+    for entry in binding["files"]:
+        assert set(entry) == {"path", "sha256"}
+        assert re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+        recorded = _git(root, "show", f"{candidate['source_commit']}:{entry['path']}")
+        assert hashlib.sha256(recorded).hexdigest() == entry["sha256"]
+        assert (root / entry["path"]).read_bytes() == recorded
+    primary = next(
+        entry for entry in binding["files"] if entry["path"] == candidate["source_file"]
+    )
+    assert primary["sha256"] == candidate["source_file_sha256"]
+
+
+@pytest.fixture
+def stabilization_candidate(ui_candidate: Path) -> Path:
+    root = ui_candidate
+    for rel in _STABILIZATION_FILES:
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("Synthetic stabilization bytes: " + rel + "\n")
+    (root / "pyproject.toml").write_text('[project]\nversion = "0.1.6"\ndependencies = ["apatch[mcp]>=0.8.51"]\n')
+    _git(root, "add", "--all")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "--no-verify", "-qm", "Synthetic stabilization binding")
+    commit = _git(root, "rev-parse", "HEAD").decode().strip()
+    files = [{"path": rel, "sha256": hashlib.sha256((root / rel).read_bytes()).hexdigest()} for rel in _STABILIZATION_FILES]
+    primary = next(row for row in files if row["path"] == "apatch_studio/app.py")
+    candidate = {"schema": "apatch.studio.oss-candidate.v1", "version": "0.1.6", "previous_published_version": "0.1.5", "source_commit": commit, "source_file": primary["path"], "source_file_sha256": primary["sha256"], "requirement": _REQUIREMENTS["0.1.6"]}
+    _write_json(root / "release/candidate.json", candidate)
+    _write_json(root / "release/publication.json", {"version": "0.1.5"})
+    _write_json(root / "release/stabilization-source-binding.json", {"schema": "apatch.studio.stabilization-source-binding.v1", "version": "0.1.6", "requirement": candidate["requirement"], "source_commit": commit, "files": files})
+    return root
+
+def test_stabilization_candidate_binds_exact_nine_paths(stabilization_candidate: Path) -> None:
+    _assert_candidate_binding(stabilization_candidate)
+
+@pytest.mark.parametrize("relative", _STABILIZATION_FILES)
+def test_stabilization_candidate_rejects_each_drift(stabilization_candidate: Path, relative: str) -> None:
+    (stabilization_candidate / relative).write_text("Drift after binding\n")
+    with pytest.raises((AssertionError, tomllib.TOMLDecodeError)):
+        _assert_candidate_binding(stabilization_candidate)
+
+@pytest.mark.parametrize("failure", ["schema", "version", "requirement", "commit", "missing_file", "extra_file", "duplicate", "reverse", "hash", "extra_field", "previous", "sdk"])
+def test_stabilization_candidate_rejects_inexact_binding(stabilization_candidate: Path, failure: str) -> None:
+    root = stabilization_candidate
+    path = root / "release/stabilization-source-binding.json"
+    binding = json.loads(path.read_text())
+    if failure in {"schema", "version", "requirement", "commit"}:
+        binding["source_commit" if failure == "commit" else failure] = "inexact"
+    elif failure == "missing_file": binding["files"].pop()
+    elif failure == "extra_file": binding["files"].append({"path": "unexpected.py", "sha256": "0" * 64})
+    elif failure == "duplicate": binding["files"][1] = dict(binding["files"][0])
+    elif failure == "reverse": binding["files"].reverse()
+    elif failure == "hash": binding["files"][0]["sha256"] = "0" * 64
+    elif failure == "extra_field": binding["files"][0]["unexpected"] = True
+    elif failure == "previous":
+        candidate = json.loads((root / "release/candidate.json").read_text())
+        candidate["previous_published_version"] = "0.1.4"
+        _write_json(root / "release/candidate.json", candidate)
+    elif failure == "sdk":
+        (root / "pyproject.toml").write_text('[project]\nversion = "0.1.6"\ndependencies = ["apatch[mcp]>=0.8.50"]\n')
+    _write_json(path, binding)
+    with pytest.raises(AssertionError):
         _assert_candidate_binding(root)

@@ -1,0 +1,39 @@
+{
+  "schema": "apatch.studio.oss-publication.v1",
+  "version": "0.1.5",
+  "source_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+  "public_candidate_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+  "artifacts": [
+    {
+      "filename": "apatch_studio-0.1.5-py3-none-any.whl",
+      "sha256": "385feb7c26c20b184c62f816fe324452e8446027c2713a044b87207165180e51"
+    },
+    {
+      "filename": "apatch_studio-0.1.5.tar.gz",
+      "sha256": "8f45549c976c1c1aedda3bc87c42b7578319daf908467e04250d0c15c2071784"
+    }
+  ],
+  "verification": [
+    {
+      "command": "python3 -m build --no-isolation --outdir /inputs/studio /reviewed/studio",
+      "result": "passed: wheel and sdist built from exact attested public repair candidate a9961c0e255f9d2aed7d07a0e8b72104ae09e650"
+    },
+    {
+      "command": "python3 -m twine check /inputs/studio/apatch_studio-0.1.5-py3-none-any.whl /inputs/studio/apatch_studio-0.1.5.tar.gz",
+      "result": "passed: both exact final archives"
+    },
+    {
+      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+      "result": "passed: unchanged Core 0.8.50 archives and all 289 installed runtime members match the previously qualified public release; its completed 2500-pass standalone qualification reused"
+    },
+    {
+      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+      "result": "passed: all 47 installed Studio runtime/web members match the exact wheel; complete unchanged suite plus three approved collision cases: 782 passed, zero failures, errors or skips"
+    },
+    {
+      "command": "python3 -I -B -m pytest /reviewed/core/tests/portable_intake/test_portable_intake.py /reviewed/studio/tests/authoring/test_contract_intake_api.py --import-mode=importlib -q --junitxml=/qa-result/frozen43.xml",
+      "result": "passed: all 43 frozen installed Core/Studio functional cases; no failures, errors or skips"
+    }
+  ],
+  "note": "Exact archives were installed and tested in non-root Linux without private packages, keys, alternate signing grants or test exclusions. Source bytes, installed runtime and dependencies were unchanged before and after qualification. Both distributions exclude Pro. READ R1 and all HISTORY requirements are natively attested; the full READ R6 selection also passed in the qualified public SDK environment, but its historical verify-only ledger rebind remains stale under the older local host SDK and is not declared closed. These installed archive observations do not declare PyPI publication, Windows qualification, live Cowork business acceptance or new browser controls. Historical publication commits, tags and archives remain immutable."
+}
