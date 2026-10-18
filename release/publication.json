@@ -1,39 +1,39 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.5",
-  "source_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
-  "public_candidate_commit": "a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
+  "version": "0.1.6",
+  "source_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
+  "public_candidate_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.5-py3-none-any.whl",
-      "sha256": "385feb7c26c20b184c62f816fe324452e8446027c2713a044b87207165180e51"
+      "filename": "apatch_studio-0.1.6-py3-none-any.whl",
+      "sha256": "3ff19867c1284ef319c067e98ef865fc4898daa52eb2fe8a5ef2e3a513a50e9a"
     },
     {
-      "filename": "apatch_studio-0.1.5.tar.gz",
-      "sha256": "8f45549c976c1c1aedda3bc87c42b7578319daf908467e04250d0c15c2071784"
+      "filename": "apatch_studio-0.1.6.tar.gz",
+      "sha256": "6467e8976a4f77b6e38d7a02df14f351104dc65ba1b7413020328e93d91fbbf8"
     }
   ],
   "verification": [
     {
-      "command": "python3 -m build --no-isolation --outdir /inputs/studio /reviewed/studio",
-      "result": "passed: wheel and sdist built from exact attested public repair candidate a9961c0e255f9d2aed7d07a0e8b72104ae09e650"
+      "command": "setuptools.build_meta.build_wheel and build_sdist",
+      "result": "passed: exact native combined source; both distribution builds completed"
     },
     {
-      "command": "python3 -m twine check /inputs/studio/apatch_studio-0.1.5-py3-none-any.whl /inputs/studio/apatch_studio-0.1.5.tar.gz",
-      "result": "passed: both exact final archives"
+      "command": "python -m twine check --strict",
+      "result": "passed: actual final wheel and sdist metadata checks"
     },
     {
-      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
-      "result": "passed: unchanged Core 0.8.50 archives and all 289 installed runtime members match the previously qualified public release; its completed 2500-pass standalone qualification reused"
+      "command": "python scripts/qualify_oss.py --profile standalone",
+      "result": "passed: fresh standalone canonical run bound to these exact installed Core archives and native custody; 2521 passed, one declared optional skip, 97 specifications and 538 commands; 96 conformant, one declared external unproven"
     },
     {
-      "command": "python3 -I -B /qa-wrapper/studio-followup/qualify_studio.py a9961c0e255f9d2aed7d07a0e8b72104ae09e650",
-      "result": "passed: all 47 installed Studio runtime/web members match the exact wheel; complete unchanged suite plus three approved collision cases: 782 passed, zero failures, errors or skips"
+      "command": "python -I -B -m pytest tests --import-mode=importlib",
+      "result": "passed: historical 802-case Studio evidence retained for unchanged payload; approved A/B successors have actual signed frozen SDD and accepted original41 coverage; current R10 verifies exact newly installed Studio runtime and declared two-route API; R9 current record is checked separately"
     },
     {
-      "command": "python3 -I -B -m pytest /reviewed/core/tests/portable_intake/test_portable_intake.py /reviewed/studio/tests/authoring/test_contract_intake_api.py --import-mode=importlib -q --junitxml=/qa-result/frozen43.xml",
-      "result": "passed: all 43 frozen installed Core/Studio functional cases; no failures, errors or skips"
+      "command": "installed Core 0.8.51 and Studio 0.1.6 cross-package import/API verification",
+      "result": "passed: fresh isolated public qualification preflight with Core 0.8.51 and Studio 0.1.6 installed from these exact wheels; historical 802 Studio cases cover unchanged payload; approved source delta is independently native-qualified and current R10 executes against the exact newly installed Studio runtime; no fresh 802-case pair rerun is claimed"
     }
   ],
-  "note": "Exact archives were installed and tested in non-root Linux without private packages, keys, alternate signing grants or test exclusions. Source bytes, installed runtime and dependencies were unchanged before and after qualification. Both distributions exclude Pro. READ R1 and all HISTORY requirements are natively attested; the full READ R6 selection also passed in the qualified public SDK environment, but its historical verify-only ledger rebind remains stale under the older local host SDK and is not declared closed. These installed archive observations do not declare PyPI publication, Windows qualification, live Cowork business acceptance or new browser controls. Historical publication commits, tags and archives remain immutable."
+  "note": "Archive and installed evidence only. No PyPI publication, live Cowork cutover, x86 qualification or new canary/rollback result is asserted. R9 finalization remains a separate native session."
 }
