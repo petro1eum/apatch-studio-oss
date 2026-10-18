@@ -746,6 +746,34 @@ def cleanup_planning_session(workspace: str | os.PathLike[str], run_id: str) -> 
         return "failed"
 
 
+def _can_retry(record: _RunRecord) -> bool:
+    """Offer governed fix-forward when a completed spec has no new attestation.
+
+    These are workspace observations, not a claim that an effect was verified.
+    Optional contribution delivery and input SDD authority are not verdicts.
+    """
+    if record.status in {"failed", "cancelled", "interrupted"}:
+        return True
+    if (record.status != "succeeded" or record.request.mode != "specification"
+            or record.phase != "complete" or not record.ended_at):
+        return False
+    review = record.review
+    if (not isinstance(review, dict)
+            or review.get("schema") != "apatch.studio.run-review.v1"
+            or review.get("attribution") != "workspace_observation_only"):
+        return False
+    baseline, result, delta = (review.get(key) for key in ("baseline", "result", "delta"))
+    if (not all(isinstance(item, dict) for item in (baseline, result, delta))
+            or any(item.get("schema") != "apatch.studio.workspace-observation.v1"
+                   for item in (baseline, result))):
+        return False
+    before, after, growth = (item.get("attested_requirements")
+                             for item in (baseline, result, delta))
+    if any(type(value) is not int or value < 0 for value in (before, after, growth)):
+        return False
+    return growth == 0 and after == before
+
+
 class AgentRunManager:
     """Bounded durable supervisor for allowlisted local coding agents."""
 
@@ -950,8 +978,8 @@ class AgentRunManager:
     def retry(self, run_id: str) -> dict[str, Any]:
         with self._lock:
             record = self._record(run_id)
-            if record.status not in {"failed", "cancelled", "interrupted"}:
-                raise RunStateError("only failed, cancelled or interrupted runs can be retried")
+            if not _can_retry(record):
+                raise RunStateError("only failed, cancelled, interrupted or unattested specification runs can be retried")
             request = record.request
             execution_context = record.execution_context
             sdd_execution = record.sdd_execution
@@ -1456,7 +1484,7 @@ class AgentRunManager:
             available_actions.append("review_plan")
         if record.status in {"queued", "running"}:
             available_actions.append("cancel")
-        if record.status in {"failed", "cancelled", "interrupted"}:
+        if _can_retry(record):
             available_actions.append("fix_forward")
         if (
             record.request.governed_session_id
@@ -1522,7 +1550,7 @@ class AgentRunManager:
             "available_actions": available_actions,
             "persisted": self._journal_status != "error",
             "can_cancel": record.status in {"queued", "running"},
-            "can_retry": record.status in {"failed", "cancelled", "interrupted"},
+            "can_retry": _can_retry(record),
             "failure": explain_failure(
                 record.outcome,
                 record.status,
