@@ -4,8 +4,9 @@ import {
   ExactDeliveryApiError, buildExactEvidence, importExactContract, listExactContracts,
   previewExactEvidence, publishExactEvidence, readExactChoices, readExactDelivery,
   readExactRun, runExactForDelivery,
+  previewExactArtifacts, publishExactArtifacts,
 } from "./exactContractDeliveryApi";
-import type { EvidenceReady, ExactContractChoices, ExactContractDelivery, ExactContractRow, PublicationResult, SharePlan } from "./exactContractDeliveryApi";
+import type { ArtifactPreview, EvidenceReady, ExactContractChoices, ExactContractDelivery, ExactContractRow, PublicationResult, SharePlan } from "./exactContractDeliveryApi";
 
 const words = {
   en: { title: "Contracts with the customer", note: "Tests are fixed by the signed agreement. Studio cannot change them or accept work for the customer.",
@@ -22,6 +23,11 @@ const words = {
     bundle: "Evidence record", time: "Time record", proof: "Agreement and proof references", requirement: "Agreed requirement",
     error: "This operation could not be completed. Refresh the selected contract before retrying.", changed: "The workspace, account or selection changed. Open the current contract and preview again.",
     importTitle: "Import a signed agreement", importLabel: "Signed agreement from the customer", import: "Import agreement", choose: "Select a contract to continue.",
+    artifactPreview: "Preview result files", artifactSend: "Send these files to the project", artifactConsent: "Deliver only these agreed result and check files to this project.",
+    artifactDone: "Exact files delivered. On the site, receive them into your sandbox and run the stage checks. This is not acceptance.",
+    expired: "This short handoff expired before execution. Return to the site and resend the same agreed contract; new consents are not required if the terms are unchanged.",
+    outputChanged: "The files do not match the signed output of this run. Check its result or complete a new authorized attempt; the old run is not reused as proof for changed files.",
+    previewChanged: "The files changed after preview. Review the exact file selection again before sending.",
   },
   ru: { title: "Договоры с заказчиком", note: "Тесты закреплены подписанным договором. Studio не может менять их или принимать работу за заказчика.",
     empty: "Согласованных договоров пока нет.", unavailable: "Передача согласованного договора ещё не настроена для этой рабочей области.",
@@ -37,6 +43,11 @@ const words = {
     bundle: "Запись доказательств", time: "Запись времени", proof: "Ссылки на договор и доказательства", requirement: "Согласованное требование",
     error: "Операцию не удалось завершить. Обновите выбранный договор перед повтором.", changed: "Рабочая область, аккаунт или выбор изменились. Откройте текущий договор и проверьте состав заново.",
     importTitle: "Импортировать подписанный договор", importLabel: "Подписанный договор от заказчика", import: "Импортировать договор", choose: "Выберите договор для продолжения.",
+    artifactPreview: "Проверить состав файлов результата", artifactSend: "Передать эти файлы в проект", artifactConsent: "Передать в этот проект только перечисленные файлы результата и согласованных проверок.",
+    artifactDone: "Точные файлы доставлены. На сайте получите их в свою песочницу и выполните проверки этапов. Это не приёмка.",
+    expired: "Короткая передача истекла до начала исполнения. Вернитесь на сайт и повторно передайте тот же договор; если условия не менялись, новые согласия не нужны.",
+    outputChanged: "Файлы не совпадают с подписанным результатом этого запуска. Проверьте результат или выполните новую разрешённую попытку; старый запуск не подтверждает изменённые файлы.",
+    previewChanged: "После предпросмотра файлы изменились. Снова проверьте точный состав перед отправкой.",
   },
 };
 
@@ -64,6 +75,8 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
   const [plan, setPlan] = useState<SharePlan | null>(null);
   const [consent, setConsent] = useState(false);
   const [publication, setPublication] = useState<PublicationResult | null>(null);
+  const [artifactPlan, setArtifactPlan] = useState<ArtifactPreview | null>(null);
+  const [artifactConsent, setArtifactConsent] = useState(false), [artifactDone, setArtifactDone] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [envelope, setEnvelope] = useState("");
@@ -78,6 +91,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
     requests.current.clear(); busyRef.current = false; setBusy(null);
     setChoices(null); setRequirement(""); setDelivery(null); setRunStatus(null);
     setEvidence(null); setPlan(null); setConsent(false); setPublication(null); setError(null);
+    setArtifactPlan(null); setArtifactConsent(false); setArtifactDone(false);
   }
   function current(stamp: number) { return epoch.current === stamp && scopeRef.current === scope; }
   async function act(kind: string, work: (signal: AbortSignal, stamp: number) => Promise<void>) {
@@ -91,7 +105,9 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         const code = reason instanceof ExactDeliveryApiError ? reason.code : "delivery_request_failed";
         const changed = ["publication_context_changed", "workspace_identity_mismatch", "publication_preview_required"].includes(code);
         if (changed) { setPlan(null); setConsent(false); setPublication(null); }
-        setError(changed ? t.changed : t.error);
+        if (code === 'artifact_package_changed') { setArtifactPlan(null); setArtifactConsent(false); setArtifactDone(false); }
+        setError(code === 'exact_contract_expired' ? t.expired : code === 'artifact_package_changed' ? t.previewChanged
+          : ['artifact_output_changed', 'artifact_output_unconfirmed'].includes(code) ? t.outputChanged : changed ? t.changed : t.error);
       }
     } finally {
       requests.current.delete(controller);
@@ -203,6 +219,22 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
           </div> : null}
           {publication ? <p role="status" data-testid="exact-evidence-delivery-status">{publication.synchronization.status === "acknowledged" ? t.received
             : publication.synchronization.status === "queued" ? t.queued : t.cached}</p> : null}
+          {runStatus === 'succeeded' && evidence && <button type="button" className="oi-button oi-button-secondary"
+            disabled={busy !== null} data-testid="exact-artifacts-preview" onClick={() => void act('artifacts-preview', async (signal, stamp) => {
+              const value = await previewExactArtifacts(selected.handoff_id, evidence.run_id, signal);
+              if (current(stamp)) { setArtifactPlan(value); setArtifactConsent(false); setArtifactDone(false); }
+            })}>{t.artifactPreview}</button>}
+          {artifactPlan && <div><p>{t.recipient}: {artifactPlan.platform_origin} · {artifactPlan.project_group_id}</p>
+            <ul>{artifactPlan.files.map(file => <li key={file.path}>{file.path}</li>)}</ul>
+            <label><input type="checkbox" data-testid="exact-artifacts-consent" checked={artifactConsent} disabled={busy !== null}
+              onChange={event => setArtifactConsent(event.target.checked)} />{t.artifactConsent}</label>
+            <button type="button" className="oi-button oi-button-primary" disabled={busy !== null || !artifactConsent}
+              data-testid="exact-artifacts-publish" onClick={() => void act('artifacts-publish', async (signal, stamp) => {
+                await publishExactArtifacts(artifactPlan, signal);
+                if (current(stamp)) { setArtifactDone(true); setArtifactConsent(false); }
+              })}>{t.artifactSend}</button>
+          </div>}
+          {artifactDone && <p role="status">{t.artifactDone}</p>}
           <details className="oi-proof"><summary>{t.proof}</summary><dl><dt>{t.requirement}</dt><dd>{requirement}</dd>
             {delivery?.source_binding_id ? <><dt>{t.ack}</dt><dd>{delivery.source_binding_id}</dd></> : null}</dl></details>
         </>}

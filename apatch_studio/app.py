@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from apatch_studio import __version__
 from apatch_studio.exact_contract_handoffs import ExactContractTrust, ExactContractManager, ExactContractConfirmation
 from apatch_studio.exact_contract_delivery import EvidenceBuildRequest
+from pydantic import Field
 from apatch_studio.action_facade import (
     AssetActionRequest,
     AssetSearchRequest,
@@ -25,6 +26,10 @@ from apatch_studio.action_facade import (
     StudioWorkflowFacade,
     SystemActionRequest,
 )
+
+
+class ArtifactPublicationRequest(EvidenceBuildRequest):
+    expected_package_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
 from apatch_studio.adapter import APatchStudioAdapter
 from apatch_studio.change_details import (
     ChangeDetailNotFound,
@@ -805,6 +810,24 @@ def create_app(
         if runtime_exact is None:
             raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
         return runtime_exact.build_for_delivery(handoff_id, request.run_id)
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/preview-artifacts")
+    def preview_exact_artifacts(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact delivery is not configured", code="exact_contract_unconfigured", status_code=503)
+        from apatch_studio.exact_contract_artifacts import preview_artifacts
+        from apatch.trust_identity import workspace_identity_scope
+        with workspace_identity_scope(str(runtime_exact.workspace)):
+            return preview_artifacts(runtime_exact, handoff_id, request.run_id)
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/publish-artifacts")
+    def publish_exact_artifacts(handoff_id: str, request: ArtifactPublicationRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact delivery is not configured", code="exact_contract_unconfigured", status_code=503)
+        from apatch_studio.exact_contract_artifacts import publish_artifacts
+        from apatch.trust_identity import workspace_identity_scope
+        with workspace_identity_scope(str(runtime_exact.workspace)):
+            return publish_artifacts(runtime_exact, handoff_id, request.run_id, expected_package_hash=request.expected_package_hash)
 
 
 

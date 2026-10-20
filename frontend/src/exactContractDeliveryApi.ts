@@ -44,6 +44,34 @@ export interface PublicationResult {
   synchronization: { status: "acknowledged" | "queued" | "not_checked_this_request"; delivered: number; pending: number };
   customer_decision: "not_requested";
 }
+export interface ArtifactPreview {
+  handoff_id: string; run_id: string; package_hash: string; platform_origin: string; project_group_id: string;
+  files: Array<{path: string; sha256: string}>;
+}
+
+export async function previewExactArtifacts(handoffId: string, runId: string, signal?: AbortSignal): Promise<ArtifactPreview> {
+  const v = await call(endpoint(handoffId) + '/preview-artifacts', {confirmed: true, run_id: text(runId, RUN)}, signal);
+  if (v.schema !== 'apatch.studio.exact-artifact-preview.v1' || v.handoff_id !== handoffId || v.run_id !== runId
+      || v.customer_accepted !== false || !Array.isArray(v.files) || !v.files.length || v.files.length > 256) invalid();
+  text(v.package_hash, HASH); text(v.project_group_id, /^tcpg_[a-f0-9]{32}$/);
+  const origin = new URL(v.platform_origin);
+  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) invalid();
+  const files: Array<{path: string; sha256: string}> = v.files.map((value: unknown) => { const f = object(value); exactKeys(f, ['path', 'sha256']);
+    if (typeof f.path !== 'string' || !f.path || f.path.length > 256 || f.path.split('/').some((p: string) => !p || p.startsWith('.'))
+        || f.path.includes('\\') || /[\x00-\x1f]/.test(f.path)) invalid();
+    return {path: f.path, sha256: text(f.sha256, HASH)}; });
+  if (new Set(files.map(f => f.path)).size !== files.length) invalid();
+  return {handoff_id: handoffId, run_id: runId, package_hash: v.package_hash, platform_origin: origin.origin,
+    project_group_id: v.project_group_id, files};
+}
+
+export async function publishExactArtifacts(preview: ArtifactPreview, signal?: AbortSignal): Promise<void> {
+  const v = await call(endpoint(preview.handoff_id) + '/publish-artifacts', {confirmed: true,
+    run_id: text(preview.run_id, RUN), expected_package_hash: text(preview.package_hash, HASH)}, signal);
+  if (v.schema !== 'apatch.studio.exact-artifact-delivery.v1' || v.handoff_id !== preview.handoff_id || v.run_id !== preview.run_id
+      || v.package_hash !== preview.package_hash || v.file_count !== preview.files.length || v.delivered !== true
+      || v.customer_accepted !== false) invalid();
+}
 
 const HASH = /^sha256:[0-9a-f]{64}$/;
 const HANDOFF = /^tceh_[0-9a-f]{32}$/;
