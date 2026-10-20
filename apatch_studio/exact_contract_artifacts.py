@@ -143,6 +143,11 @@ def build_package(manager, handoff_id, run_id):
                 denied("Candidate is outside an agreed requirement", "artifact_path_denied")
     if set(candidates).intersection(judges):
         denied("Candidate overlaps immutable checks", "artifact_path_denied")
+    selected = [e for e in snapshot["task_envelopes"].values() if e["requirement"] == row["requirement"]]
+    if len(selected) != 1 or any(not any(fnmatch.fnmatchcase(path, pattern)
+            for pattern in selected[0]["allowed_reads"] + selected[0]["allowed_writes"])
+            for path in set(candidates) | set(judges)):
+        denied("Artifact reads exceed the selected requirement", "artifact_path_denied")
     files = {p: read_exact(manager.workspace, p) for p in sorted(set(candidates) | set(judges))}
     if sum(map(len, files.values())) > LIMIT:
         denied("Artifact package is too large", "artifact_size_limit")

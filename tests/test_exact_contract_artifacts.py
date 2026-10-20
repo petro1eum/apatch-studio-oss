@@ -32,7 +32,7 @@ def scenario(tmp_path, monkeypatch):
     native = {"obligations": [{"judge_assets": [{"path": p, "sha256": "sha256:" + hashlib.sha256(v).hexdigest()}
                                               for p, v in files.items() if p != "src/result.py"]}]}
     bundle = {"snapshot": {"frozen_contract": native, "task_envelopes": {"R1": {
-        "allowed_reads": list(files), "allowed_writes": ["src/result.py"], "forbidden_paths": ["private/*"]}}},
+        "requirement": "SPEC-TEST#R1", "allowed_reads": list(files), "allowed_writes": ["src/result.py"], "forbidden_paths": ["private/*"]}}},
         "handoff": {**{k: plan[k] for k in ("tenant_id", "project_group_id", "work_item_id")},
             "contract_id": "tciwc_" + "c" * 32, "snapshot_hash": "sha256:" + "d" * 64,
             "native_contract_hash": "sha256:" + "e" * 64}}
