@@ -164,7 +164,8 @@ class ExactContractTrust:
                     denied('Exact public authority pin is invalid', 'exact_authority_unconfigured', 503)
                 checked[key_id] = public
             maps[field] = checked
-        if not isinstance(value['trusted_origins'], list) or not all(isinstance(x,str) and x.startswith('https://') for x in value['trusted_origins']):
+        from apatch_studio.security import _normalized_origin
+        if not isinstance(value['trusted_origins'], list) or not all(isinstance(x,str) and _normalized_origin(x) is not None for x in value['trusted_origins']):
             denied('Exact trusted origins are invalid', 'exact_authority_unconfigured', 503)
         return cls(**maps, trusted_origins=value['trusted_origins'])
 
