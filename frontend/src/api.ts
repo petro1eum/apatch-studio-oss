@@ -313,6 +313,7 @@ export const runWorkspaceAction = (
   action: WorkspaceAction,
   alias: string | null = null,
   confirmed = false,
+  scopeHash: string | null = null,
 ) =>
   request<ActionReceipt<WorkspaceActionResult>>("/api/v1/workspaces/actions", {
     method: "POST",
@@ -320,6 +321,7 @@ export const runWorkspaceAction = (
       request_id: actionRequestId("workspace"),
       action,
       ...(alias ? { alias } : {}),
+      ...(scopeHash ? { scope_hash: scopeHash } : {}),
       confirmed,
     }),
   });

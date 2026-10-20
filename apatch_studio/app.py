@@ -12,6 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from apatch_studio import __version__
+from apatch_studio.exact_contract_handoffs import ExactContractTrust, ExactContractManager, ExactContractConfirmation
+from apatch_studio.exact_contract_delivery import EvidenceBuildRequest
 from apatch_studio.action_facade import (
     AssetActionRequest,
     AssetSearchRequest,
@@ -164,6 +166,9 @@ def create_app(
     delivery_pack_workflow: DeliveryPackWorkflow | None = None,
     sdd_facade: Any | None = None,
     identity_root: str | Path | None = None,
+    exact_contract_trust: ExactContractTrust | None = None,
+    exact_contract_manager: ExactContractManager | None = None,
+    exact_contract_state_root: str | Path | None = None,
 ) -> FastAPI:
     frontend = Path(frontend_root) if frontend_root else _frontend_root()
     active_edition = StudioEdition.parse(edition)
@@ -197,9 +202,19 @@ def create_app(
             state_root=intent_state_root,
         )
 
+    runtime_exact = exact_contract_manager
+    if runtime_exact is None and exact_contract_trust is not None:
+        runtime_exact = ExactContractManager(
+            workspace, run_manager=runtime_runs, trust=exact_contract_trust,
+            state_root=exact_contract_state_root, sdd_facade=runtime_sdd,
+            actor_id="studio:implementation",
+            gateway=(runtime_intents.governed_work_gateway if runtime_intents is not None else None),
+        )
+    exact_origins = runtime_exact.trust.trusted_origins if runtime_exact is not None else frozenset()
+
     request_guard = guard or StudioRequestGuard(
         trusted_execution_origins=(
-            runtime_intents.trusted_origins if runtime_intents is not None else frozenset()
+            (runtime_intents.trusted_origins if runtime_intents is not None else frozenset()) | exact_origins
         )
     )
 
@@ -230,6 +245,7 @@ def create_app(
     app.state.lock_authority = lock_authority
     app.state.studio_edition = active_edition
     app.state.studio_intents = runtime_intents
+    app.state.studio_exact_contracts = runtime_exact
 
     @app.middleware("http")
     async def local_boundary(request: Request, call_next):
@@ -346,7 +362,7 @@ def create_app(
             {
                 "ok": False,
                 "error": str(error),
-                "error_code": "cowork_result_delivery_failed",
+                "error_code": error.code,
             },
             status_code=409,
         )
@@ -700,6 +716,63 @@ def create_app(
     install_document_publication_routes(app, workspace, identity_root=lock_authority.identity_root)
     install_ownership_handoff_routes(app, workspace, identity_root=lock_authority.identity_root)
 
+    @app.post("/api/v1/exact-contract-handoffs/import")
+    async def import_exact_contract(request: Request) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact purpose authority pins are not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.import_raw(await request.body())
+
+
+    @app.get("/api/v1/exact-contract-handoffs")
+    def list_exact_contracts() -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact purpose authority pins are not configured", code="exact_authority_unconfigured", status_code=503)
+        return {"schema": "apatch.studio.exact-contract-list.v1", "workspace_id": runtime_exact.workspace_id, "items": runtime_exact.list()}
+
+
+    @app.get("/api/v1/exact-contract-handoffs/{handoff_id}")
+    def get_exact_contract(handoff_id: str) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact purpose authority pins are not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.get(handoff_id)
+
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/confirm", status_code=202)
+    def confirm_exact_contract(handoff_id: str, confirmation: ExactContractConfirmation) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact purpose authority pins are not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.confirm(handoff_id, confirmation)
+
+
+    @app.get("/api/v1/exact-contract-handoffs/{handoff_id}/delivery-choices")
+    def exact_delivery_choices(handoff_id: str) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.delivery_choices(handoff_id)
+
+
+    @app.get("/api/v1/exact-contract-handoffs/{handoff_id}/delivery")
+    def exact_delivery_projection(handoff_id: str) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.delivery_projection(handoff_id)
+
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/confirm-for-delivery", status_code=202)
+    def confirm_exact_contract_for_delivery(handoff_id: str, confirmation: ExactContractConfirmation) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.confirm_for_delivery(handoff_id, confirmation)
+
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/build-evidence")
+    def build_exact_contract_evidence(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
+        return runtime_exact.build_for_delivery(handoff_id, request.run_id)
+
+
+
     assets = frontend / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
@@ -736,5 +809,7 @@ def create_app(
         if route.startswith("api/") or route.startswith("assets/"):
             return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
         return index_response()
+
+
 
     return app

@@ -887,7 +887,7 @@ class StudioWorkflowFacade:
             catalog = health.get("mcp_tool_catalog") or {}
             writer = raw.get("writer_protocol") or {}
             result = {
-                "ok": bool(raw.get("ok", True)),
+                "ok": bool(raw.get("ok", True)) and (request.action != "doctor" or health.get("ok") is True),
                 "action": request.action,
                 "version": raw.get("version"),
                 "profile": fingerprint.get("mcp_profile") or raw.get("mcp_profile"),

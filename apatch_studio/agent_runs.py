@@ -344,15 +344,76 @@ def _preparation_package_lines(request: AgentRunRequest, spec_id: str | None) ->
     ]
 
 
+def bind_execution_source_artifacts(
+    argv: list[str], runner: RunnerId, artifacts: list[dict[str, Any]],
+) -> list[str]:
+    """Transport verified references as data in the existing process-local MCP config."""
+    if not artifacts:
+        return argv
+    encoded = json.dumps(artifacts, ensure_ascii=True, sort_keys=True)
+    if runner == "codex":
+        if not argv or argv[-1] != "-" or not any("mcp_servers.apatch.env=" in item for item in argv):
+            raise RunnerUnavailableError("the bound run requires the canonical APatch MCP descriptor")
+        return [*argv[:-1], "-c", "mcp_servers.apatch.env.APATCH_EXECUTION_SOURCE_ARTIFACTS=" + json.dumps(encoded), "-"]
+    if runner == "claude":
+        selected = list(argv)
+        try:
+            position = selected.index("--mcp-config") + 1
+            config = json.loads(selected[position])
+            config["mcpServers"]["apatch"]["env"]["APATCH_EXECUTION_SOURCE_ARTIFACTS"] = encoded
+            selected[position] = json.dumps(config, sort_keys=True)
+        except (ValueError, KeyError, TypeError, IndexError) as exc:
+            raise RunnerUnavailableError("the bound run requires the canonical APatch MCP descriptor") from exc
+        return selected
+    raise RunnerUnavailableError("the runner cannot carry the exact source binding")
+
+
+def execution_source_artifacts(
+    workspace: Path, request: AgentRunRequest, context: ExecutionContext | None,
+    *, state_root: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Revalidate the accepted assignment and signed binding before runner launch."""
+    if context is None or request.mode not in {"requirement", "specification"}:
+        return []
+    from apatch import governed_work as G
+    from apatch.spec_executor import resolve_source_binding_artifacts
+    from apatch_studio.intent_store import IntentStore
+
+    rows = [row for row in IntentStore(workspace, state_root=state_root).load()
+            if row.get("intent_id") == context.intent_id]
+    if len(rows) != 1:
+        raise RunStateError("the exact accepted execution intent is unavailable")
+    record = rows[0]
+    if record.get("cowork_status") in {"not_connected", "local_only"}:
+        return []
+    if record.get("status") not in {"consuming", "consumed"} or record.get("cowork_status") != "source_bound":
+        raise RunStateError("the assignment has no acknowledged source binding")
+    for key, value in context.model_dump(exclude={"schema"}).items():
+        if record.get(key) != value:
+            raise RunStateError("the accepted intent differs from this run's exact context")
+    binding = G.load_project_source_binding(str(workspace), record["cowork_source_binding_id"])
+    if binding.get("binding_id") != record["cowork_source_binding_id"] or binding.get("change_id") != record["cowork_change_id"]:
+        raise RunStateError("the source binding differs from the accepted assignment")
+    for key in ("tenant_id", "project_group_id", "work_program_id", "work_program_hash"):
+        if binding.get(key) != getattr(context, key):
+            raise RunStateError("the source binding has another assignment scope")
+    return resolve_source_binding_artifacts(
+        str(workspace), str(request.spec_id), [G.source_binding_artifact(binding)],
+        requirement_id=request.requirement_id if request.mode == "requirement" else None,
+    )
+
+
 def build_governed_prompt(
     request: AgentRunRequest,
     *,
     retry: bool = False,
     execution_context: ExecutionContext | None = None,
     sdd_execution: SddExecutionContext | None = None,
+    source_binding_context=None,
     studio_run_id: str | None = None,
     planning_contract_run_id: str | None = None,
     planning_context: str | None = None,
+    source_artifacts: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build mode-specific instructions; user content is transported over stdin."""
 
@@ -415,6 +476,23 @@ def build_governed_prompt(
                 "They authorize no runner, path, command, environment, session or business acceptance.",
             ]
         )
+
+    if source_binding_context is not None:
+        common.extend([
+            'This explicit full-delivery run has two independently signed authority receipts joined by the same Change.',
+            'source_binding_artifacts_json=' + json.dumps(list(source_binding_context.artifacts),separators=(',',':')),
+            'Pass that exact artifacts array to native apatch_session_start before any mutation.',
+            'Preserve it in the signed native attestation and ContributionEvent; absent or changed artifacts make delivery unqualified.',
+            'Native success is evidence only, never customer acceptance.',
+        ])
+    if source_artifacts:
+        exact_artifacts = json.dumps(source_artifacts, ensure_ascii=False, sort_keys=True)
+        common.extend([
+            "Before any mutation, preserve the following verified ProjectSourceBinding in the native session artifacts: " + exact_artifacts,
+            "For one requirement, call apatch_session_start(requirement='<exact SPEC#Rk>', artifacts=" + exact_artifacts + ") before apatch_execute_next and reuse that exact returned session id/token.",
+            "For a whole specification, keep the canonical apatch_spec_run flow: include artifacts=" + exact_artifacts + " alongside needles in EVERY requirements[Rk] entry. Never split the SPEC into a hand-written execution loop.",
+            "If an existing session lacks this exact artifact, stop: never attach it after mutation or retrofit an old attestation.",
+        ])
 
     if sdd_execution is not None:
         from apatch.sdd_integrity import canonical_json
@@ -479,8 +557,9 @@ def build_governed_prompt(
             "1. Use only the Studio-supplied context capsule; do not open project files.",
             "2. Run APatch doctor, then continue an exact-lineage partial contract when the capsule contains one.",
             "3. Draft the RFP, SPEC, frozen test contract and preparation package completely before writing.",
+            "If the capsule reports an existing frozen contract and this lineage has no SPEC yet, the following write steps do not apply: return a JSON array of exact {path, content} files for the original run owner-review surface. Do not call session_start, borrow an unrelated contract, or claim approval. The owner-reviewed initial preparation transaction creates the package without replacing the current frozen profile; implementation still needs its separate owner freeze.",
             "4. For a fresh lineage, open one contract-authoring session with apatch_session_start(intent=..., artifacts=['spec-bootstrap:<preallocated SPEC id>#R0', 'rfp:<preallocated RFP id>']) and create the complete RFP, complete SPEC, frozen test/fixture files and preparation package in one mutation batch of that session (apatch_generate_batch, apatch_simulate, apatch_apply_session), then verify, attest and end it.",
-            "5. If the exact-lineage SPEC scaffold already exists, call apatch_session_start once for the exact SPEC#R0, then call apatch_execute_next with that same session id/token, the complete ordered needles list and no finalize flag.",
+            "5. If the exact-lineage SPEC scaffold already exists, use SPEC#R0 only when that requirement exists and owns the intended preparation files. Otherwise prepare an exact path/content draft repair for owner review in Studio under the original run. Do not invent R0, replace the lineage, claim owner approval, or disable strict ownership. After approval, continue with the same SPEC and its separate owner freeze.",
             "6. Repeat apatch_execute_next for the same session with no new needles while each response says continue=true. Only after continue=false, call it once with finalize=true and no needles. Do not place generate_batch, resume_session or rollback between these calls.",
             "Use at most 8 structured repository inspection command starts before the first contract write.",
             "After the first contract-authoring event, do not perform further repository inspection.",
@@ -636,6 +715,10 @@ def build_planning_context(
     root = Path(workspace).expanduser().resolve()
     rfp_id, spec_id = planning_contract_ids(contract_run_id)
     sections: list[str] = []
+    if (root / ".apatch/sdd_verification_contract.json").exists():
+        sections.append("## Existing frozen contract\nThis workspace already has a frozen verification contract. "
+                        "For a new lineage, return the complete exact path/content preparation package for "
+                        "owner review; do not open a legacy bootstrap session or reuse another contract.")
     for label, relative, byte_limit in (
         ("Project operating contract", Path("AGENTS.md"), 8_000),
         ("Project summary", Path("README.md"), 12_000),
@@ -746,34 +829,6 @@ def cleanup_planning_session(workspace: str | os.PathLike[str], run_id: str) -> 
         return "failed"
 
 
-def _can_retry(record: _RunRecord) -> bool:
-    """Offer governed fix-forward when a completed spec has no new attestation.
-
-    These are workspace observations, not a claim that an effect was verified.
-    Optional contribution delivery and input SDD authority are not verdicts.
-    """
-    if record.status in {"failed", "cancelled", "interrupted"}:
-        return True
-    if (record.status != "succeeded" or record.request.mode != "specification"
-            or record.phase != "complete" or not record.ended_at):
-        return False
-    review = record.review
-    if (not isinstance(review, dict)
-            or review.get("schema") != "apatch.studio.run-review.v1"
-            or review.get("attribution") != "workspace_observation_only"):
-        return False
-    baseline, result, delta = (review.get(key) for key in ("baseline", "result", "delta"))
-    if (not all(isinstance(item, dict) for item in (baseline, result, delta))
-            or any(item.get("schema") != "apatch.studio.workspace-observation.v1"
-                   for item in (baseline, result))):
-        return False
-    before, after, growth = (item.get("attested_requirements")
-                             for item in (baseline, result, delta))
-    if any(type(value) is not int or value < 0 for value in (before, after, growth)):
-        return False
-    return growth == 0 and after == before
-
-
 class AgentRunManager:
     """Bounded durable supervisor for allowlisted local coding agents."""
 
@@ -819,6 +874,7 @@ class AgentRunManager:
             lambda run_id: cleanup_planning_session(root, run_id)
         )
         self._popen = popen
+        self._external_dispatch_guard = None
         self._review_collector = review_collector or WorkspaceReviewCollector(root).capture
         self._plan_handoff_collector = plan_handoff_collector or PlanHandoffCollector(root)
         self._scope_baseline_collector = scope_baseline_collector or (
@@ -882,6 +938,31 @@ class AgentRunManager:
                 visited.add(cursor.run_id)
             return cursor.run_id
 
+    def configure_external_dispatch_guard(self, guard):
+        if not callable(guard):
+            raise ValueError("external dispatch guard must be callable")
+        with self._lock:
+            if any(record.status not in _TERMINAL for record in self._runs.values()):
+                raise RunStateError("cannot replace the external guard while work is active")
+            self._external_dispatch_guard = guard
+
+    def _guard_external_dispatch(self, request, context, sdd_execution, *, stage):
+        if context is not None:
+            if self._external_dispatch_guard is None:
+                raise RunStateError("external work requires a current canonical acknowledgement")
+            result = self._external_dispatch_guard(request, context, sdd_execution, stage=stage)
+            if result is not None:
+                from apatch_studio.exact_contract_delivery import SourceBoundExecutionContext
+                result = SourceBoundExecutionContext.model_validate(result)
+                if (sdd_execution is None or result.requirement != sdd_execution.spec_id + '#' + sdd_execution.requirement_id
+                        or result.contract_hash != sdd_execution.contract_hash
+                        or result.task_envelope_hash != sdd_execution.envelope_hash
+                        or result.tenant_id != context.tenant_id
+                        or result.project_group_id != context.project_group_id
+                        or result.work_item_id != context.work_item_id):
+                    raise RunStateError('full-delivery authority context differs from the selected exact run')
+                return result
+
     def start(
         self,
         request: AgentRunRequest,
@@ -893,6 +974,7 @@ class AgentRunManager:
         if sdd_execution is not None and not isinstance(sdd_execution, SddExecutionContext):
             sdd_execution = SddExecutionContext.model_validate(sdd_execution)
         self._runner_command(request)
+        self._guard_external_dispatch(request, execution_context, sdd_execution, stage="start")
         with self._lock:
             if self._closed:
                 raise RunStateError("run manager is closed")
@@ -978,8 +1060,8 @@ class AgentRunManager:
     def retry(self, run_id: str) -> dict[str, Any]:
         with self._lock:
             record = self._record(run_id)
-            if not _can_retry(record):
-                raise RunStateError("only failed, cancelled, interrupted or unattested specification runs can be retried")
+            if record.status not in {"failed", "cancelled", "interrupted"}:
+                raise RunStateError("only failed, cancelled or interrupted runs can be retried")
             request = record.request
             execution_context = record.execution_context
             sdd_execution = record.sdd_execution
@@ -1177,16 +1259,26 @@ class AgentRunManager:
                 if planning_contract_run_id is not None
                 else None
             )
+            source_binding_context = self._guard_external_dispatch(
+                record.request,record.execution_context,record.sdd_execution,stage='pre_popen')
+            source_artifacts = execution_source_artifacts(
+                self._workspace, record.request, record.execution_context,
+                state_root=self._store.state_root,
+            )
+            argv = bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
             prompt = build_governed_prompt(
                 record.request,
                 retry=record.retry_of is not None,
                 execution_context=record.execution_context,
                 sdd_execution=record.sdd_execution,
+                source_binding_context=source_binding_context,
                 studio_run_id=(record.run_id if record.request.mode == "new_change" else None),
                 planning_contract_run_id=planning_contract_run_id,
                 planning_context=planning_context,
+                source_artifacts=source_artifacts,
             )
             process_env = os.environ.copy()
+            process_env.pop("APATCH_EXECUTION_SOURCE_ARTIFACTS", None)
             if record.request.mode == "new_change":
                 process_env["APATCH_LANE"] = planning_lane_for_run(record.run_id)
             process = self._popen(
@@ -1484,7 +1576,7 @@ class AgentRunManager:
             available_actions.append("review_plan")
         if record.status in {"queued", "running"}:
             available_actions.append("cancel")
-        if _can_retry(record):
+        if record.status in {"failed", "cancelled", "interrupted"}:
             available_actions.append("fix_forward")
         if (
             record.request.governed_session_id
@@ -1550,7 +1642,7 @@ class AgentRunManager:
             "available_actions": available_actions,
             "persisted": self._journal_status != "error",
             "can_cancel": record.status in {"queued", "running"},
-            "can_retry": _can_retry(record),
+            "can_retry": record.status in {"failed", "cancelled", "interrupted"},
             "failure": explain_failure(
                 record.outcome,
                 record.status,
@@ -1573,3 +1665,32 @@ class AgentRunManager:
         if forbidden.intersection(projection):
             raise AssertionError("unsafe run projection")
         return projection
+
+
+def _can_retry(record: _RunRecord) -> bool:
+    """Offer governed fix-forward when a completed spec has no new attestation.
+
+    These are workspace observations, not a claim that an effect was verified.
+    Optional contribution delivery and input SDD authority are not verdicts.
+    """
+    if record.status in {"failed", "cancelled", "interrupted"}:
+        return True
+    if (record.status != "succeeded" or record.request.mode != "specification"
+            or record.phase != "complete" or not record.ended_at):
+        return False
+    review = record.review
+    if (not isinstance(review, dict)
+            or review.get("schema") != "apatch.studio.run-review.v1"
+            or review.get("attribution") != "workspace_observation_only"):
+        return False
+    baseline, result, delta = (review.get(key) for key in ("baseline", "result", "delta"))
+    if (not all(isinstance(item, dict) for item in (baseline, result, delta))
+            or any(item.get("schema") != "apatch.studio.workspace-observation.v1"
+                   for item in (baseline, result))):
+        return False
+    before, after, growth = (item.get("attested_requirements")
+                             for item in (baseline, result, delta))
+    if any(type(value) is not int or value < 0 for value in (before, after, growth)):
+        return False
+    return growth == 0 and after == before
+

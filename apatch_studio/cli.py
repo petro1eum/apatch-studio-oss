@@ -21,7 +21,8 @@ from apatch_studio.endpoint_enrollment import (
     name_this_machine,
 )
 from apatch_studio.endpoint_identity import endpoint_identity_status
-from apatch_studio.execution_intents import ExecutionIntentTrust
+from apatch_studio.execution_intents import ExecutionIntentTrust, ExecutionIntentError
+from apatch_studio.exact_contract_handoffs import ExactContractTrust
 from apatch_studio.run_store import default_state_root
 from apatch_studio.runtime_requirements import probe_runtime_requirements, runtime_banner_lines
 from apatch_studio.security import is_loopback_host
@@ -43,6 +44,11 @@ def _parser() -> argparse.ArgumentParser:
         "--execution-intent-trust-file",
         default=os.environ.get("APATCH_STUDIO_EXECUTION_INTENT_TRUST_FILE"),
         help="Public authority pins for signed tasks received from Cowork",
+    )
+    serve.add_argument(
+        "--exact-contract-trust-file",
+        default=os.environ.get("APATCH_STUDIO_EXACT_CONTRACT_TRUST_FILE"),
+        help="Public purpose-specific authority pins for exact Cowork contracts",
     )
 
     sub.add_parser(
@@ -89,12 +95,17 @@ def serve(args: argparse.Namespace) -> int:
             if args.execution_intent_trust_file
             else None
         )
-    except ValueError as exc:
+        exact_trust = (
+            ExactContractTrust.from_path(args.exact_contract_trust_file)
+            if args.exact_contract_trust_file else None
+        )
+    except (ValueError, ExecutionIntentError) as exc:
         raise SystemExit(str(exc)) from exc
     app = create_app(
         str(workspace),
         edition=StudioEdition.OSS,
         execution_intent_trust=trust,
+        exact_contract_trust=exact_trust,
     )
 
     sock = socket.socket(family, socket.SOCK_STREAM)

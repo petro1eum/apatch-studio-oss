@@ -1161,6 +1161,24 @@ class SddWorkflowFacade:
         })
 
     def freeze_requirement(self, spec_id: str, requirement_id: str, *, owner_actor_id: str, confirmed: bool, expected_snapshot: str | None = None) -> dict[str, Any]:
+        try:
+            from apatch import sdd_draft_amendment as draft
+        except ImportError:
+            if (self.root / ".apatch/sdd/draft-amendments").exists():
+                raise SddWorkflowError("Install draft-repair-capable Core before freezing",
+                    code="sdd_draft_unavailable", status_code=503)
+            return self._freeze_requirement_unlocked(spec_id, requirement_id,
+                owner_actor_id=owner_actor_id, confirmed=confirmed, expected_snapshot=expected_snapshot)
+        try:
+            with draft.freeze_lock(self.root):
+                draft.assert_can_freeze(self.root)
+                return self._freeze_requirement_unlocked(spec_id, requirement_id,
+                    owner_actor_id=owner_actor_id, confirmed=confirmed, expected_snapshot=expected_snapshot)
+        except (ValueError, OSError) as exc:
+            raise SddWorkflowError("Complete or recover the pending draft repair before freezing",
+                code="sdd_draft_pending") from exc
+
+    def _freeze_requirement_unlocked(self, spec_id: str, requirement_id: str, *, owner_actor_id: str, confirmed: bool, expected_snapshot: str | None = None) -> dict[str, Any]:
         if confirmed is not True:
             raise SddWorkflowError("Owner confirmation is required", code="sdd_owner_confirmation_required", status_code=422)
         owner = _clean_text(owner_actor_id)

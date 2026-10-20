@@ -47,6 +47,10 @@ _TIMESHEET_REF_KEYS = {
 class ResultDeliveryError(RuntimeError):
     """A stable failure that never includes source or result content."""
 
+    def __init__(self, message: str, *, code: str = "cowork_result_delivery_failed"):
+        super().__init__(message)
+        self.code = code
+
 
 class ResultPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -402,6 +406,12 @@ class CoworkResultDelivery:
                 "immutable id is already bound to another envelope:"
             )
         )
+        if (built.get("error_type") == "GOVERNED_WORK_INVALID"
+                and build_error.startswith("missing source-bound attestations:")):
+            raise ResultDeliveryError(
+                "the completed session lacks the assignment's source-bound attestation; new governed work is required",
+                code="source_bound_attestation_missing",
+            )
         if build_error and not reused_persisted_evidence:
             raise ResultDeliveryError("local APatch evidence could not be prepared")
         evidence_bundle_id: str | None = None

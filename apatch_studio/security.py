@@ -13,6 +13,8 @@ from fastapi.responses import JSONResponse, Response
 
 SESSION_HEADER = "x-apatch-studio-session"
 EXECUTION_INTENT_IMPORT_PATH = "/api/v1/execution-intents/import"
+EXACT_CONTRACT_IMPORT_PATH = "/api/v1/exact-contract-handoffs/import"
+TRUSTED_IMPORT_PATHS = frozenset({EXECUTION_INTENT_IMPORT_PATH, EXACT_CONTRACT_IMPORT_PATH})
 
 
 def _host_without_port(value: str) -> str:
@@ -33,9 +35,13 @@ def is_loopback_host(value: str) -> bool:
 
 
 def _normalized_origin(value: str) -> str | None:
-    parsed = urlsplit(value)
+    try:
+        parsed = urlsplit(value)
+        host, port_number = parsed.hostname, parsed.port
+    except ValueError:
+        return None
     if (
-        parsed.scheme != "https"
+        parsed.scheme not in {"http", "https"}
         or not parsed.hostname
         or parsed.username
         or parsed.password
@@ -44,8 +50,11 @@ def _normalized_origin(value: str) -> str | None:
         or parsed.fragment
     ):
         return None
-    port = f":{parsed.port}" if parsed.port is not None else ""
-    return f"https://{parsed.hostname.lower()}{port}"
+    if parsed.scheme == 'http' and not is_loopback_host(parsed.hostname):
+        return None
+    port = f":{port_number}" if port_number is not None else ""
+    host = '[' + parsed.hostname.lower() + ']' if ':' in parsed.hostname else parsed.hostname.lower()
+    return f"{parsed.scheme}://{host}{port}"
 
 
 def _same_origin(request: Request) -> bool:
@@ -67,7 +76,7 @@ class StudioRequestGuard:
     def __post_init__(self) -> None:
         normalized = {_normalized_origin(value) for value in self.trusted_execution_origins}
         if None in normalized:
-            raise ValueError("trusted execution origins must be exact HTTPS origins")
+            raise ValueError("trusted execution origins must be exact HTTPS or HTTP loopback origins")
         self.trusted_execution_origins = frozenset(
             value for value in normalized if value is not None
         )
@@ -77,7 +86,7 @@ class StudioRequestGuard:
         return origin if origin in self.trusted_execution_origins else None
 
     def preflight(self, request: Request) -> Response | None:
-        if request.method != "OPTIONS" or request.url.path != EXECUTION_INTENT_IMPORT_PATH:
+        if request.method != "OPTIONS" or request.url.path not in TRUSTED_IMPORT_PATHS:
             return None
         if self._trusted_execution_origin(request) is None:
             return JSONResponse(
@@ -103,7 +112,7 @@ class StudioRequestGuard:
         path = request.url.path
         if not path.startswith("/api/") or path == "/api/v1/health":
             return None
-        if path == EXECUTION_INTENT_IMPORT_PATH:
+        if path in TRUSTED_IMPORT_PATHS:
             content_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
             if request.method != "POST" or content_type != "application/json":
                 return JSONResponse(
@@ -133,7 +142,7 @@ class StudioRequestGuard:
         return None
 
     def cors_headers(self, response: Response, request: Request) -> None:
-        if request.url.path != EXECUTION_INTENT_IMPORT_PATH:
+        if request.url.path not in TRUSTED_IMPORT_PATHS:
             return
         origin = self._trusted_execution_origin(request)
         if origin is None:

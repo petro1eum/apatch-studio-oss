@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import shutil
 from pathlib import Path
 
 from setuptools.command.build_py import build_py
@@ -37,6 +38,14 @@ def _built_frontend() -> Path:
 class BuildWithFrontend(build_py):
     def run(self):
         frontend = _built_frontend()
+        # Restored sources can be older than an earlier build/lib copy. Build a
+        # fresh package payload; timestamps must not select the released code.
+        package = Path(self.build_lib) / "apatch_studio"
+        if package.is_symlink() or package.resolve() == (ROOT / "apatch_studio").resolve():
+            raise RuntimeError("Build output must be separate from the Studio sources.")
+        if package.exists() and not self.dry_run:
+            shutil.rmtree(package)
+        self.force = True
         super().run()
         self.copy_tree(str(frontend), str(Path(self.build_lib) / "apatch_studio" / "_web"))
 

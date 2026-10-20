@@ -1,3 +1,4 @@
+import { ExactContractDeliveryInbox } from "./ExactContractDeliveryInbox";
 import {
   AlertTriangle,
   Check,
@@ -36,6 +37,7 @@ import type {
   CoworkResultDeliveryReceipt,
   ExecutionIntentPreview,
   RunnerInfo,
+  ProjectSetup,
   WorkspaceAlias,
   WorkspaceOverview,
 } from "./types";
@@ -126,36 +128,61 @@ function RuntimeAdmin({ data, requestConfirm, onChanged }: { data: WorkspaceOver
 function WorkspaceAdmin({ data, requestConfirm }: { data: WorkspaceOverview; requestConfirm: (request: ConfirmRequest) => void }) {
   const [alias, setAlias] = useState(data.workspace.name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z]+/, "") || "workspace");
   const [items, setItems] = useState<WorkspaceAlias[]>([]);
+  const [setup, setSetup] = useState<ProjectSetup | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function refresh() {
-    const receipt = await runWorkspaceAction("list");
-    setItems(receipt.result.items ?? []);
+  async function refresh(restoreSelection = false) {
+    const [listed, status] = await Promise.all([runWorkspaceAction("list"), runWorkspaceAction("setup_status")]);
+    setItems(listed.result.items ?? []);
+    const saved = status.result.setup ?? null;
+    setSetup(saved);
+    if (restoreSelection && saved?.alias) setAlias(saved.alias);
   }
 
-  useEffect(() => { void refresh().catch(() => setError("Workspace list unavailable.")); }, []);
+  useEffect(() => {
+    void refresh(true).catch(() => setError("Saved project connection could not be loaded. Retry status to read it again."));
+    const focused = () => { void refresh().catch(() => setError("Project status is unavailable.")); };
+    window.addEventListener("focus", focused);
+    return () => window.removeEventListener("focus", focused);
+  }, []);
 
-  async function mutate(action: "register" | "remove", value: string) {
+  async function check(action: "setup_confirm" | "setup_retry", reviewed?: ProjectSetup) {
     try {
       setActing(action);
       setError(null);
-      await runWorkspaceAction(action, value, true);
-      await refresh();
+      const receipt = action === "setup_confirm"
+        ? await runWorkspaceAction(action, reviewed?.alias ?? null, true, reviewed?.scope_hash ?? null)
+        : await runWorkspaceAction(action);
+      setSetup(receipt.result.setup ?? null);
+      const listed = await runWorkspaceAction("list");
+      setItems(listed.result.items ?? []);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Workspace action failed.");
+      setError(reason instanceof Error ? reason.message : "Connection check failed. Your selection is saved.");
     } finally {
       setActing(null);
     }
   }
 
-  function register() {
-    requestConfirm({
-      title: "Add workspace alias",
-      message: "Register @" + alias + " for the workspace currently open in Studio?",
-      confirmLabel: "Add alias",
-      action: () => mutate("register", alias),
-    });
+  async function register() {
+    try {
+      setActing("setup_review");
+      setError(null);
+      const receipt = await runWorkspaceAction("setup_review", alias);
+      const reviewed = receipt.result.setup;
+      if (!reviewed) throw new Error("Project scope could not be read.");
+      setSetup(reviewed);
+      requestConfirm({
+        title: "Confirm project setup",
+        message: "Register @" + reviewed.alias + " for “" + data.workspace.name + "” and check its configured MCP runtime? This records project routing. Signing authorization is checked for the requested operation.",
+        confirmLabel: "Confirm and check",
+        action: () => check("setup_confirm", reviewed),
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Project scope could not be read.");
+    } finally {
+      setActing(null);
+    }
   }
 
   function remove(value: string) {
@@ -164,14 +191,52 @@ function WorkspaceAdmin({ data, requestConfirm }: { data: WorkspaceOverview; req
       message: "Remove @" + value + " from local routing?",
       confirmLabel: "Remove",
       tone: "danger",
-      action: () => mutate("remove", value),
+      action: async () => {
+        try {
+          setActing("remove");
+          setError(null);
+          await runWorkspaceAction("remove", value, true);
+          await refresh();
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : "Workspace action failed.");
+        } finally { setActing(null); }
+      },
     });
   }
 
+  const ready = setup?.connection_ready === true;
+  const confirmed = setup && !setup.confirmation_required;
+  const stageLabel = (status: string | undefined) => status === "satisfied" ? "Checked" : status === "failed" ? "Needs attention" : status === "stale" ? "Changed — check again" : "Not observed";
+  const setupError = setup?.last_error ? ({
+    configured_runtime_timeout: "The runtime did not answer in time. Retry continues with the same confirmed project.",
+    configured_runtime_interrupted: "The previous check was interrupted. Continue from the saved project.",
+    workspace_setup_scope_changed: "Project settings changed. Review the current scope to continue.",
+    workspace_alias_not_current: "This alias belongs to another project. Choose a different alias.",
+    project_readiness_unavailable: "Connection status is unavailable in the current runtime. Your project settings are saved.",
+  } as Record<string, string>)[setup.last_error.code] ?? "The connection check could not finish. Your selected project is saved." : null;
   return <section className="oi-panel">
-    <div className="oi-inline-form"><label className="oi-field"><span>Alias</span><input value={alias} onChange={(event) => setAlias(event.target.value)} /></label><button className="oi-button oi-button-primary" type="button" disabled={acting !== null || !alias} onClick={register}><Check size={15} />Add current workspace</button></div>
-    <div className="oi-list">{items.map((item) => <div className="oi-list-row" key={item.alias}><div><strong>@{item.alias}</strong><span>{item.ready ? "Ready" : "Needs attention"}</span></div><button className="oi-icon-button" title={"Remove @" + item.alias} type="button" onClick={() => remove(item.alias)}><Trash2 size={15} /></button></div>)}</div>
-    {error ? <div className="oi-alert is-error"><AlertTriangle size={15} />{error}</div> : null}
+    <div className="oi-panel-heading"><div><span>Project connection</span><strong>{data.workspace.name}</strong></div><Database size={20} /></div>
+    <ol className="oi-key-values" aria-label="Project connection steps">
+      <li>Project selected: {data.workspace.name}</li>
+      <li>Project scope: {setup?.alias ? "@" + setup.alias + " → current project" : "Choose an alias below"}</li>
+      <li>Setup confirmation: {confirmed ? "Saved for this project and configuration" : "Required once for the reviewed scope"}</li>
+      <li>Connection: {ready ? "Ready" : acting === "setup_confirm" || acting === "setup_retry" ? "Checking…" : "Pending"}</li>
+    </ol>
+    <div className="oi-inline-form"><label className="oi-field"><span>Alias for this project</span><input value={alias} onChange={(event) => setAlias(event.target.value)} /></label><button className="oi-button oi-button-primary" type="button" disabled={acting !== null || !alias} onClick={() => void register()}><Check size={15} />{confirmed && setup.alias === alias ? "Review project settings" : "Add current workspace"}</button></div>
+    {setup ? <div role="status" aria-live="polite">
+      <dl className="oi-key-values">
+        <div><dt>Project configuration</dt><dd>{stageLabel(setup.states.configured.status)}</dd></div>
+        <div><dt>Configured runtime</dt><dd>{setup.runtime_checked ? "Checked in a separate process" : "Not checked"}</dd></div>
+        <div><dt>Tools in the current host</dt><dd>{stageLabel(setup.states.loaded.status)}</dd></div>
+        <div><dt>Access for the requested operation</dt><dd>{stageLabel(setup.states.authorized.status)}</dd></div>
+      </dl>
+      {ready ? <p>Ready. This project’s tools and access were observed.</p> : confirmed ? <p>{setup.runtime_checked ? "Settings saved. The connection to Codex will be checked on the first tool call. You can continue to your plans." : "Your confirmed project is saved. Continue the connection check from this step."}</p> : null}
+      {setupError ? <p className="oi-alert is-error">{setupError}</p> : null}
+      {setup.retry_available ? <button className="oi-button oi-button-secondary" type="button" disabled={acting !== null} onClick={() => void check("setup_retry")}><RefreshCw size={15} />Retry connection check</button> : null}
+      {confirmed && setup.registered && setup.runtime_checked ? <a className="oi-button oi-button-primary" href="#/backlog">Continue to plans</a> : null}
+    </div> : null}
+    <div className="oi-list">{items.map((item) => <div className="oi-list-row" key={item.alias}><div><strong>@{item.alias}</strong><span>{item.ready ? "Registered" : "Registration needs attention"}</span></div><button className="oi-icon-button" title={"Remove @" + item.alias} type="button" disabled={acting !== null} onClick={() => remove(item.alias)}><Trash2 size={15} /></button></div>)}</div>
+    {error ? <div className="oi-alert is-error"><AlertTriangle size={15} />{error}<button className="oi-button oi-button-secondary" type="button" disabled={acting !== null} onClick={() => void refresh(true).then(() => setError(null)).catch(() => setError("Project status is still unavailable."))}>Retry status</button></div> : null}
   </section>;
 }
 
@@ -372,6 +437,7 @@ export function InboxView({
   }
 
   return <div className="oi-page">
+    <ExactContractDeliveryInbox data={data} runners={runners} onChanged={onChanged} />
     <header className="oi-page-header"><div><span>Signed requests</span><h1>Inbox</h1><p>{items.filter((item) => item.can_confirm).length} ready</p></div></header>
     <div className="oi-list">{items.map((item) => <article className="oi-list-row oi-request-row" key={item.intent_id}>
       <UserRoundCheck size={18} />

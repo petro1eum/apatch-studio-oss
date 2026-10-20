@@ -922,7 +922,31 @@ export interface SystemActionResult extends Record<string, unknown> {
   skipped_count?: number;
 }
 
-export type WorkspaceAction = "list" | "register" | "remove";
+export type WorkspaceAction = "list" | "register" | "remove"
+  | "setup_status" | "setup_review" | "setup_confirm" | "setup_retry";
+
+export interface ProjectSetup {
+  schema: "apatch.studio.project-setup.v1";
+  workspace_id: string;
+  alias: string | null;
+  scope_hash: string;
+  config_sha256: string | null;
+  contract_sha256: string | null;
+  registered: boolean;
+  confirmation_required: boolean;
+  confirmed_scope_hash: string | null;
+  step: "choose_project" | "review_scope" | "connection_pending" | "ready";
+  blocked_step: string | null;
+  states: Record<"configured" | "loaded" | "authorized" | "verified", {
+    status: "satisfied" | "not_observed" | "stale" | "failed";
+    reason: string | null;
+  }>;
+  runtime_checked: boolean;
+  connection_ready: boolean;
+  host_tool_availability: "observed" | "not_observable";
+  retry_available: boolean;
+  last_error: { code: string; step: string; retryable: boolean } | null;
+}
 
 export interface WorkspaceAlias {
   alias: string;
@@ -942,6 +966,7 @@ export interface WorkspaceActionResult extends Record<string, unknown> {
   current_workspace?: boolean;
   ready?: boolean;
   removed?: boolean;
+  setup?: ProjectSetup;
 }
 
 export type EvidenceAction =

@@ -341,6 +341,8 @@ class ExecutionIntentManager:
             governed_work_gateway or APatchGovernedWorkGateway(self.workspace)
         )
         self.result_delivery = result_delivery or CoworkResultDelivery(self.workspace)
+        if hasattr(run_manager, "configure_external_dispatch_guard"):
+            run_manager.configure_external_dispatch_guard(self.governed_work_gateway.guard_execution)
         self._reconcile_inflight()
 
     @property
@@ -654,7 +656,7 @@ class ExecutionIntentManager:
                 raise ExecutionIntentError(
                     "Cowork acceptance or source binding was not acknowledged",
                     code="cowork_acceptance_incomplete",
-                    status_code=502,
+                    status_code=409 if getattr(exc, "code", None) == "exact_contract_required" else 502,
                 ) from exc
 
             bound_at = self._utc_now().isoformat()

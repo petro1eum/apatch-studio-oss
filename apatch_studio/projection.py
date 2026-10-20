@@ -32,28 +32,37 @@ def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
     contract = view.get("contract")
     if not isinstance(contract, Mapping):
         return view
+    environment = contract.get("judge_environment")
+    if environment is not None:
+        # Private guard projection only. A validated local content seal is not
+        # a person's consent or an external execution authority.
+        try:
+            from apatch.sdd_integrity import issue_capability, canonical_hash
+            issue_capability(
+                value["contract"], value["task_envelope"],
+                actor_id=value["actor_id"], role="implementation",
+            )
+            if (not isinstance(environment, Mapping) or set(environment) != {"cwd", "env"}
+                    or not isinstance(environment["cwd"], str) or not isinstance(environment["env"], Mapping)
+                    or not all(isinstance(k, str) and isinstance(v, str) for k, v in environment["env"].items())):
+                raise ValueError("private judge setup shape is invalid")
+            digest = canonical_hash(environment)
+        except (ImportError, KeyError, RuntimeError, ValueError) as exc:
+            raise UnsafeProjectionError("invalid private SDD judge setup") from exc
+        contract.pop("judge_environment")
+        contract["judge_setup_hash"] = digest
     amendment = contract.get("judge_amendment")
     bootstrap = amendment.get("bootstrap") if isinstance(amendment, Mapping) else None
-    has_archives = isinstance(bootstrap, Mapping) and bootstrap.get("kind") == "pytest_explicit_conftest_bootstrap"
-    has_judge_config = "judge_environment" in contract
-    if not has_archives and not has_judge_config:
+    if not isinstance(bootstrap, Mapping) or bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap":
         return view
     try:
         from apatch.sdd_integrity import issue_capability
         issue_capability(
-            contract, view["task_envelope"],
-            actor_id=view["actor_id"], role="implementation",
+            value["contract"], value["task_envelope"],
+            actor_id=value["actor_id"], role="implementation",
         )
     except (ImportError, KeyError, RuntimeError, ValueError) as exc:
         raise UnsafeProjectionError("invalid private SDD archive binding") from exc
-    if has_judge_config:
-        from apatch.sdd_integrity import canonical_hash
-        configuration = contract.pop("judge_environment")
-        if not isinstance(configuration, Mapping) or "private_judge_configuration" in contract:
-            raise UnsafeProjectionError("invalid private judge configuration")
-        contract["private_judge_configuration"] = {"hash": canonical_hash(configuration)}
-    if not has_archives:
-        return view
     for field, pin in (
         ("old_spec_text", "old_spec_hash"),
         ("replacement_spec_text", "new_spec_hash"),

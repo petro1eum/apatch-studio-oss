@@ -474,12 +474,14 @@ export function ChangeCard({
       : run.can_cancel
         ? "View progress"
         : "Open change";
-  const nextIcon = run.can_retry ? Repeat2 : ArrowRight;
+  const nextIcon = !planReady && run.status !== "succeeded" && run.can_retry ? Repeat2 : ArrowRight;
   const nextAction = planReady
     ? openPreparedPlan
-    : run.can_retry
-      ? () => void retry()
-      : onToggle;
+    : run.status === "succeeded"
+      ? onToggle
+      : run.can_retry
+        ? () => void retry()
+        : onToggle;
   const planningElapsed = run.started_at
     ? (clock - new Date(run.started_at).getTime()) / 1000
     : 0;

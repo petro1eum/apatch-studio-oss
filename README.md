@@ -78,3 +78,9 @@ source code or personal data.
 ## License
 
 MIT. See [LICENSE](https://github.com/petro1eum/apatch-studio-oss/blob/main/LICENSE).
+
+## Service maintenance 0.1.7 (20 October 2026)
+
+Preserves the installed 0.1.6 result-delivery journal and routes, and adds guarded exact-contract import with an explicitly configured public trust document (`--exact-contract-trust-file`). Import never authorizes execution. Without an enrolled server binding and matching public pins, this channel is unavailable. The existing local service uses APatch 0.8.54; this source branch does not claim PyPI publication or a completed production exact-contract scenario.
+
+Packaging now rebuilds the Python package from source even if a cached build copy has a newer timestamp, and removes stale modules from that generated package directory. Focused verification: 45 API/security/result-delivery tests and the actual stale-build regression.
