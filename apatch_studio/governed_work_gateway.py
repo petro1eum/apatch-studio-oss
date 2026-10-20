@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from threading import RLock
 
 from pydantic import BaseModel, ConfigDict, Field
+from apatch.trust_identity import workspace_identity_scope
 
 
 ROUND_TRIP_SYNC_ROUNDS = 2
@@ -324,7 +325,7 @@ class APatchGovernedWorkGateway:
 
     def preview_evidence(self, *, binding_id):
         """Read only one content-free native plan; replace prior selection."""
-        with self._publication_lock:
+        with self._publication_lock, workspace_identity_scope(str(self.workspace)):
             self._publication_selection = None
             try:
                 context, _provider = self._publication_context()
@@ -361,7 +362,7 @@ class APatchGovernedWorkGateway:
 
     def publish_evidence(self, *, plan, confirmation):
         """Publish only the previewed selection; ACK is never customer review."""
-        with self._publication_lock:
+        with self._publication_lock, workspace_identity_scope(str(self.workspace)):
             selection = self._publication_selection
             if selection is None:
                 raise GovernedWorkGatewayError(

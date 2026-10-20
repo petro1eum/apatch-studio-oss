@@ -95,6 +95,12 @@ def native_requirement_refs(spec_bytes, requirement):
     return [{'requirement_id':selected[0].id,'requirement_hash':selected[0].content_hash}]
 
 
+def native_acceptance_purpose(requirement, handoff_id):
+    # A renewed handoff carries a new native proposal. Its immutable acceptance
+    # must not collide with the previous handoff for the same requirement.
+    return 'Execute the exact agreed requirement ' + requirement + ' via handoff ' + handoff_id
+
+
 def exact(value, keys):
     if not isinstance(value, dict) or set(value) != set(keys):
         denied('Exact document has an invalid closed shape')
@@ -580,7 +586,7 @@ class ExactContractManager:
             h, proposal = bundle['handoff'], bundle['legacy_intent']
             accepted = M.accept_execution_proposal(str(self.workspace), proposal=proposal,
                 confirmation=f"{proposal['work_item_id']}:{proposal['authority_version']}", spec_id=sdd.spec_id,
-                requirement_ids=[sdd.requirement_id], purpose='Execute the exact agreed requirement ' + confirmation.requirement,
+                requirement_ids=[sdd.requirement_id], purpose=native_acceptance_purpose(confirmation.requirement, h['handoff_id']),
                 queue_source_binding=False, request_key_provider=provider, now=self.clock())
             if accepted.get('ok') is not True or accepted.get('work_started') is not False:
                 denied('Native acceptance is unavailable', 'exact_native_acceptance_failed')

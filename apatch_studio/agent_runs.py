@@ -370,7 +370,7 @@ def bind_execution_source_artifacts(
 
 def execution_source_artifacts(
     workspace: Path, request: AgentRunRequest, context: ExecutionContext | None,
-    *, state_root: str | os.PathLike[str] | None = None,
+    *, state_root: str | os.PathLike[str] | None = None, source_binding_context=None,
 ) -> list[dict[str, Any]]:
     """Revalidate the accepted assignment and signed binding before runner launch."""
     if context is None or request.mode not in {"requirement", "specification"}:
@@ -378,6 +378,26 @@ def execution_source_artifacts(
     from apatch import governed_work as G
     from apatch.spec_executor import resolve_source_binding_artifacts
     from apatch_studio.intent_store import IntentStore
+
+    if source_binding_context is not None:
+        # Exact bilateral admission already verified its own signed journal.
+        # Do not require a second, unrelated legacy intent-store entry.
+        bound = source_binding_context
+        if (bound.tenant_id != context.tenant_id or bound.project_group_id != context.project_group_id
+                or bound.work_item_id != context.work_item_id
+                or bound.requirement != str(request.spec_id) + '#' + str(request.requirement_id)):
+            raise RunStateError("the exact source context differs from this run")
+        binding = G.load_project_source_binding(str(workspace), bound.source_binding_id)
+        if (G.document_hash(binding) != bound.source_binding_hash
+                or G.envelope_hash(binding) != bound.source_binding_envelope_hash
+                or any(binding.get(key) != getattr(context, key) for key in
+                       ("tenant_id", "project_group_id", "work_program_id", "work_program_hash"))):
+            raise RunStateError("the exact source binding differs from this run")
+        artifact = G.source_binding_artifact(binding)
+        if artifact not in bound.artifacts:
+            raise RunStateError("the exact source reference is not admitted")
+        return resolve_source_binding_artifacts(str(workspace), str(request.spec_id), [artifact],
+            requirement_id=request.requirement_id)
 
     rows = [row for row in IntentStore(workspace, state_root=state_root).load()
             if row.get("intent_id") == context.intent_id]
@@ -1263,7 +1283,7 @@ class AgentRunManager:
                 record.request,record.execution_context,record.sdd_execution,stage='pre_popen')
             source_artifacts = execution_source_artifacts(
                 self._workspace, record.request, record.execution_context,
-                state_root=self._store.state_root,
+                state_root=self._store.state_root, source_binding_context=source_binding_context,
             )
             argv = bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
             prompt = build_governed_prompt(

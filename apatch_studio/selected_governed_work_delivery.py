@@ -28,14 +28,19 @@ def qualify_native_delivery():
     pins = {
         G: '739539e4d918c3ec7f3a1b2db13697b4c7c56d7362bc39128a7ac07abdd74225',
         D: '0f0e9aff091fc205d4166011ab07897fd3e705f0f4230d10a6658ba9a67e6bcd',
-        M: '706bb92b053e2d5cdb06b976d8a0f0e914e757e325a7ea1f4e86560252f803e7',
+        M: None,
         T: 'ad83263d9b60fa42d447f202893a2835ffc83443b28813e70036cb608c93596d',
     }
     try:
         distribution = importlib.metadata.distribution('apatch')
         origin = Path(distribution.locate_file('apatch')).resolve()
-        if distribution.version != '0.8.47':
+        mcp_pins = {
+            '0.8.47': '706bb92b053e2d5cdb06b976d8a0f0e914e757e325a7ea1f4e86560252f803e7',
+            '0.8.55': 'da70d52c24bd19ad3a623813c6b3fcf6b9ac4bf23c14c43f49f405b3226dd597',
+        }
+        if distribution.version not in mcp_pins:
             raise ValueError('unsupported installed native version')
+        pins[M] = mcp_pins[distribution.version]
         for module, expected in pins.items():
             path = Path(module.__file__)
             if (path.is_symlink() or path.resolve().parent != origin

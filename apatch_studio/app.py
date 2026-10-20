@@ -54,6 +54,11 @@ from apatch_studio.execution_intents import (
     ExecutionIntentManager,
     ExecutionIntentTrust,
 )
+from apatch_studio.governed_work_gateway import (
+    EvidencePreviewRequest,
+    EvidencePublicationRequest,
+    GovernedWorkGatewayError,
+)
 from apatch_studio.intent_store import IntentJournalError
 from apatch_studio.local_review import (
     LocalReviewHandoff,
@@ -354,6 +359,13 @@ def create_app(
         return JSONResponse(
             {"ok": False, "error": str(error), "error_code": error.code},
             status_code=error.status_code,
+        )
+
+    @app.exception_handler(GovernedWorkGatewayError)
+    async def governed_work_error(_request: Request, error: GovernedWorkGatewayError):
+        return JSONResponse(
+            {"ok": False, "error": str(error), "error_code": error.code},
+            status_code=409,
         )
 
     @app.exception_handler(ResultDeliveryError)
@@ -715,6 +727,29 @@ def create_app(
     from apatch_studio.ownership_handoff_workflow import install_routes as install_ownership_handoff_routes
     install_document_publication_routes(app, workspace, identity_root=lock_authority.identity_root)
     install_ownership_handoff_routes(app, workspace, identity_root=lock_authority.identity_root)
+
+    def evidence_gateway():
+        gateway = (
+            runtime_exact.gateway if runtime_exact is not None
+            else runtime_intents.governed_work_gateway if runtime_intents is not None
+            else None
+        )
+        if gateway is None:
+            raise ExecutionIntentError(
+                "Cowork evidence publication is not configured",
+                code="governed_evidence_unconfigured", status_code=503,
+            )
+        return gateway
+
+    @app.post("/api/v1/governed-work/evidence/preview")
+    def preview_governed_evidence(request: EvidencePreviewRequest) -> dict[str, Any]:
+        return evidence_gateway().preview_evidence(binding_id=request.binding_id)
+
+    @app.post("/api/v1/governed-work/evidence/publish")
+    def publish_governed_evidence(request: EvidencePublicationRequest) -> dict[str, Any]:
+        return evidence_gateway().publish_evidence(
+            plan=request.plan, confirmation=request.confirmation,
+        )
 
     @app.post("/api/v1/exact-contract-handoffs/import")
     async def import_exact_contract(request: Request) -> dict[str, Any]:
