@@ -188,7 +188,9 @@ def publish_artifacts(manager, handoff_id, run_id, *, expected_package_hash):
         denied("The files changed after preview; preview this version again", "artifact_package_changed")
     config = D.load_config(str(manager.workspace))
     path = f"/api/internal/project-groups/{m['project_group_id']}/governed-work/evidence-admissions"
-    key = "studio-artifacts:" + G.document_hash(m)
+    # Reuse native admission idempotency. A new transport-only key would try to
+    # insert the already admitted immutable evidence bundle a second time.
+    key = "evidence-admission:" + built["evidence_bundle"]["bundle_id"]
     body = G.canonical_bytes({"subject": config["client_id"], "tenant_id": m["tenant_id"],
         "evidence_bundle": built["evidence_bundle"], "timesheet_draft": built["timesheet"],
         "artifact_package": package, "idempotency_key": key})

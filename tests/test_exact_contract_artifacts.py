@@ -100,6 +100,27 @@ def test_preview_does_not_transmit_files_and_changed_candidate_requires_new_prev
     s.manager.http_client_factory.assert_not_called()
 
 
+def test_artifact_delivery_replays_native_admission_instead_of_reinserting_evidence(scenario, monkeypatch):
+    s=scenario
+    preview=a.preview_artifacts(s.manager,"tceh_"+"1"*32,"apr_"+"2"*32)
+    expected="evidence-admission:apweb_"+"f"*32
+    def post(url, *, content, headers):
+        body=json.loads(content)
+        assert body["idempotency_key"]==headers["Idempotency-Key"]==expected
+        assert body["artifact_package"]["manifest"]["files"]==preview["files"]
+        # Test double models the existing native admission's immutable identity.
+        return SimpleNamespace(status_code=201,json=lambda:{"schema":"trustchain.cowork.artifact-admission.v1",
+            "native_ack":{"TEST_ONLY":"same existing native acknowledgement"},"package_hash":preview["package_hash"],
+            "file_count":len(preview["files"]),"delivered":True,"customer_accepted":False})
+    client=SimpleNamespace(post=post)
+    from contextlib import nullcontext
+    s.manager.http_client_factory=lambda:nullcontext(client)
+    monkeypatch.setattr(a.T,"signed_service_headers",lambda *args,**kwargs:{"TEST_ONLY":"no real HTTP"})
+    for _ in range(2):
+        result=a.publish_artifacts(s.manager,preview["handoff_id"],preview["run_id"],expected_package_hash=preview["package_hash"])
+        assert result["delivered"] is True and result["customer_accepted"] is False
+
+
 @pytest.fixture
 def native_records(tmp_path, monkeypatch):
     """Genuine SDK-signed persisted records; source lookup is a test double."""
