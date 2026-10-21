@@ -529,7 +529,10 @@ class ExactContractManager:
                 break
             for run in children:
                 parent = lineage[run['retry_of']]
-                if (parent['status'] not in ('failed', 'cancelled', 'interrupted')
+                retryable = (parent['status'] in ('failed', 'cancelled', 'interrupted')
+                    or (parent['status'] == 'succeeded' and parent.get('can_retry') is True
+                        and parent.get('contribution') is None))
+                if (not retryable
                         or any(run.get(key) != first.get(key) for key in
                             ('mode', 'runner', 'execution_context', 'execution_contract'))):
                     denied('Delivery retry changed its admitted context', 'exact_delivery_run_incomplete')

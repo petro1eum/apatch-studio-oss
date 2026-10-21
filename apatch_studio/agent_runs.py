@@ -505,7 +505,7 @@ def build_governed_prompt(
             'Preserve it in the signed native attestation and ContributionEvent; absent or changed artifacts make delivery unqualified.',
             'Native success is evidence only, never customer acceptance.',
         ])
-    if source_artifacts:
+    if source_artifacts and source_binding_context is None:
         exact_artifacts = json.dumps(source_artifacts, ensure_ascii=False, sort_keys=True)
         common.extend([
             "Before any mutation, preserve the following verified ProjectSourceBinding in the native session artifacts: " + exact_artifacts,
@@ -529,6 +529,13 @@ def build_governed_prompt(
                 "After that exact session is open, call apatch_execute_next only for the selected requirement.",
             ]
         )
+        if sdd_execution.contract.get('supersedes_hash') and source_binding_context is not None:
+            common.extend([
+                'This is a NEW, bilaterally agreed acceptance-scheme generation. A historical attested requirement is not proof for this generation.',
+                'If the source already implements the requirement, do NOT fabricate a source edit or retrofit old artifacts. Open a fresh verification-only session with the exact new contract, envelope, actor and ALL source_binding_artifacts_json above.',
+                'Run apatch_sdd_verify for that fresh session. It executes the unchanged frozen judges, their inventory, reversible RED/restored GREEN and content snapshot. Then apatch_verify_run with the exact configured requirement command, apatch_attest and apatch_session_end for the same fresh session. Never substitute spec_status or old coverage for these calls.',
+                'Use a dedicated lane for this fresh session. The prior attestation and its source binding stay immutable. Existing unrelated audit violations do not authorize cleanup: report them separately, preserve them and distinguish this run\'s captured scope delta. If a required verification or this run\'s own scope fails, report failure, never success.',
+            ])
 
     if request.mode == "new_change":
         template_spec_id: str | None = None
@@ -1080,7 +1087,7 @@ class AgentRunManager:
     def retry(self, run_id: str) -> dict[str, Any]:
         with self._lock:
             record = self._record(run_id)
-            if record.status not in {"failed", "cancelled", "interrupted"}:
+            if not _can_retry_exact(record):
                 raise RunStateError("only failed, cancelled or interrupted runs can be retried")
             request = record.request
             execution_context = record.execution_context
@@ -1596,7 +1603,7 @@ class AgentRunManager:
             available_actions.append("review_plan")
         if record.status in {"queued", "running"}:
             available_actions.append("cancel")
-        if record.status in {"failed", "cancelled", "interrupted"}:
+        if _can_retry_exact(record):
             available_actions.append("fix_forward")
         if (
             record.request.governed_session_id
@@ -1662,7 +1669,7 @@ class AgentRunManager:
             "available_actions": available_actions,
             "persisted": self._journal_status != "error",
             "can_cancel": record.status in {"queued", "running"},
-            "can_retry": record.status in {"failed", "cancelled", "interrupted"},
+            "can_retry": _can_retry_exact(record),
             "failure": explain_failure(
                 record.outcome,
                 record.status,
@@ -1685,6 +1692,15 @@ class AgentRunManager:
         if forbidden.intersection(projection):
             raise AssertionError("unsafe run projection")
         return projection
+
+
+def _can_retry_exact(record: _RunRecord) -> bool:
+    if record.status in {'failed', 'cancelled', 'interrupted'}:
+        return True
+    return (record.status == 'succeeded' and record.request.mode == 'requirement'
+            and record.execution_context is not None and record.sdd_execution is not None
+            and bool(record.sdd_execution.contract.get('supersedes_hash'))
+            and record.contribution is None)
 
 
 def _can_retry(record: _RunRecord) -> bool:
