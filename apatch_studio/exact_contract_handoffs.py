@@ -347,7 +347,7 @@ class ExactContractManager:
     def _project(row):
         return {key:row[key] for key in ('handoff_id','intent_id','status','requirement','run_id','bundle_hash')}
 
-    def _preflight(self, bundle, requirement):
+    def _preflight(self, bundle, requirement, *, install_revision=False):
         match = REQUIREMENT.fullmatch(requirement)
         if match is None or requirement not in {x['requirement'] for x in bundle['handoff']['requirements']}:
             denied('This requirement was not agreed', 'exact_requirement_mismatch')
@@ -355,6 +355,13 @@ class ExactContractManager:
             denied('Existing local execution actor is not configured', 'exact_actor_unavailable', 503)
         current = SddExecutionContext.model_validate(self.sdd.execution_binding(match[1], match[2], actor_id=self.actor_id))
         expected = bundle['snapshot']
+        if (install_revision and current.contract.get('document_hash') != expected['frozen_contract'].get('document_hash')
+                and expected['frozen_contract'].get('acceptance_scheme') is not None):
+            from apatch_studio.exact_scheme_revision import install_revision as install_scheme
+            try:
+                current = SddExecutionContext.model_validate(install_scheme(self, bundle, requirement))
+            except (ValueError, OSError):
+                denied('The new agreed scheme could not be installed safely', 'exact_revision_unconfirmed')
         if (raw_canonical(current.contract) != raw_canonical(expected['frozen_contract'])
                 or raw_canonical(current.task_envelope) != raw_canonical(expected['task_envelopes'][match[2]])):
             denied('The already frozen local contract is different', 'exact_local_contract_mismatch')
@@ -580,7 +587,7 @@ class ExactContractManager:
             # disconnect fence; the provider is the already enrolled identity.
             provider = self.gateway._workspace_key_provider()
             bundle = self._read_bundle(row)
-            sdd = self._preflight(bundle, confirmation.requirement)
+            sdd = self._preflight(bundle, confirmation.requirement, install_revision=True)
             if for_delivery and 'apatch_attest' not in sdd.task_envelope['tools']:
                 denied('The agreed envelope does not authorize an attested delivery cycle', 'exact_delivery_contract_required')
             h, proposal = bundle['handoff'], bundle['legacy_intent']
