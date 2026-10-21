@@ -46,39 +46,71 @@ def validate_revision(previous, previous_envelopes, candidate, envelopes, source
     return plan
 
 
-def install_revision(manager, bundle, requirement):
-    """Caller is the explicit local confirmation, never an import or a GET."""
+def _review_inputs(manager, bundle, requirement):
     snapshot = bundle['snapshot']
     candidate, envelopes = snapshot['frozen_contract'], snapshot['task_envelopes']
     spec, rk = requirement.split('#')
-    if bundle['handoff']['performer_principal_ref'] != 'member:' + hashlib.sha256(manager.actor_id.encode()).hexdigest()[:32]:
-        raise ValueError('The local actor is not this contract performer')
+    if any(r['status'] in {'queued', 'running', 'cancelling', 'starting'} for r in manager.run_manager.list()):
+        raise ValueError('A running task must finish before changing the current execution profile')
+    current = manager.sdd.execution_binding(spec, rk, actor_id=manager.actor_id)
+    previous = current['contract']
+    previous_envelopes = {name: manager.sdd.execution_binding(spec, name, actor_id=manager.actor_id)['task_envelope']
+                          for name in envelopes}
+    import json
+    with StateDirectory(manager.workspace / 'acceptance') as directory:
+        source_bytes = directory.read_bytes('work-plan.json', limit=1_048_576)
+    plan = validate_revision(previous, previous_envelopes, candidate, envelopes, json.loads(source_bytes))
+    for check in previous['obligations']:
+        for asset in check['judge_assets']:
+            parent, _, filename = asset['path'].rpartition('/')
+            with StateDirectory(manager.workspace / parent) as directory:
+                data = directory.read_bytes(filename, limit=1_048_576)
+            if 'sha256:' + hashlib.sha256(data).hexdigest() != asset['sha256']:
+                raise ValueError('An existing immutable asset changed')
+    with StateDirectory(manager.workspace / 'docs/specs') as directory:
+        spec_bytes = directory.read_bytes(spec + '.md', limit=1_048_576)
+    if 'sha256:' + hashlib.sha256(spec_bytes).hexdigest() != previous['spec_hash']:
+        raise ValueError('The existing SPEC changed')
+    return current, previous_envelopes, plan, source_bytes
+
+
+def review_revision(manager, bundle, requirement):
+    """Review the incoming profile without installing it or asserting identity."""
+    spec, rk = requirement.split('#')
     with manager.run_manager._lock, manager.sdd._freeze_lock:
-        if any(r['status'] in {'queued', 'running', 'cancelling', 'starting'} for r in manager.run_manager.list()):
-            raise ValueError('A running task must finish before changing the current execution profile')
-        current = manager.sdd.execution_binding(spec, rk, actor_id=manager.actor_id)
+        current, _, _, _ = _review_inputs(manager, bundle, requirement)
+        candidate = bundle['snapshot']['frozen_contract']
+        envelope = bundle['snapshot']['task_envelopes'][rk]
+        S.issue_capability(candidate, envelope, actor_id=manager.actor_id, role='implementation')
+        return {**current, 'contract': candidate, 'task_envelope': envelope,
+                'contract_hash': candidate['document_hash'], 'envelope_hash': envelope['document_hash']}
+
+
+def install_revision(manager, bundle, requirement, *, association):
+    """Install only after Platform verifies the enrolled key's actual performer.
+
+    The Studio process actor is a local execution role, not an SSO principal.
+    A purpose-verified fresh ACK bridges those identities; a local name cannot.
+    """
+    from apatch import governed_work as G
+    from apatch_studio.exact_contract_handoffs import BIND_PURPOSE
+    G.verify_platform_document_signature(association, manager.trust.association_keys, purpose=BIND_PURPOSE)
+    h = bundle['handoff']
+    expected = {name: h[name] for name in ('handoff_id', 'contract_id', 'snapshot_hash',
+        'tenant_id', 'project_group_id', 'work_item_id', 'work_program_id', 'work_program_hash',
+        'commissioner_principal_ref', 'performer_principal_ref', 'consents_hash', 'native_contract_hash')}
+    expected.update(handoff_document_hash=G.document_hash(h), handoff_envelope_hash=G.envelope_hash(h),
+        requirement=requirement,
+        task_envelope_hash=bundle['snapshot']['task_envelopes'][requirement.split('#')[1]]['document_hash'])
+    if any(association.get(name) != value for name, value in expected.items()):
+        raise ValueError('The acknowledged performer or agreed revision changed')
+    snapshot = bundle['snapshot']
+    candidate, envelopes = snapshot['frozen_contract'], snapshot['task_envelopes']
+    spec, rk = requirement.split('#')
+    with manager.run_manager._lock, manager.sdd._freeze_lock:
+        current, previous_envelopes, plan, source_bytes = _review_inputs(manager, bundle, requirement)
         previous = current['contract']
-        previous_envelopes = {}
-        for name in envelopes:
-            old = manager.sdd.execution_binding(spec, name, actor_id=manager.actor_id)
-            previous_envelopes[name] = old['task_envelope']
         import json
-        with StateDirectory(manager.workspace / 'acceptance') as directory:
-            source_bytes = directory.read_bytes('work-plan.json', limit=1_048_576)
-        plan = validate_revision(previous, previous_envelopes, candidate, envelopes, json.loads(source_bytes))
-        # Plan and SPEC are the only authority-bearing input that may differ.
-        # Every other judge file is checked before the first write.
-        for check in previous['obligations']:
-            for asset in check['judge_assets']:
-                parent, _, filename = asset['path'].rpartition('/')
-                with StateDirectory(manager.workspace / parent) as directory:
-                    data = directory.read_bytes(filename, limit=1_048_576)
-                if 'sha256:' + hashlib.sha256(data).hexdigest() != asset['sha256']:
-                    raise ValueError('An existing immutable asset changed')
-        with StateDirectory(manager.workspace / 'docs/specs') as directory:
-            spec_bytes = directory.read_bytes(spec + '.md', limit=1_048_576)
-        if 'sha256:' + hashlib.sha256(spec_bytes).hexdigest() != previous['spec_hash']:
-            raise ValueError('The existing SPEC changed')
         # StateDirectory rejects symlinks/unsafe ancestry and writes atomically.
         writes = [(PLAN_PATH, S.canonical_json(plan).encode('utf-8'))]
         encoded = lambda d: (json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(',', ':')) + '\n').encode()

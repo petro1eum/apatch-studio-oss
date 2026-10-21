@@ -6,12 +6,16 @@ import copy
 import hashlib
 import json
 import threading
+import base64
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 from apatch import sdd_integrity as S
-from apatch_studio.exact_scheme_revision import validate_revision
-from apatch_studio.exact_contract_handoffs import ExactContractManager
+from apatch import governed_work as G
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from apatch_studio.exact_scheme_revision import validate_revision, install_revision
+from apatch_studio.exact_contract_handoffs import ExactContractManager, BIND_PURPOSE
 from apatch_studio.sdd_workflow import SddWorkflowFacade
 from apatch_studio.execution_intents import ExecutionIntentError
 
@@ -64,9 +68,23 @@ def world(tmp_path):
     manager.workspace=tmp_path;manager.actor_id='performer';manager.sdd=facade
     manager.run_manager=SimpleNamespace(_lock=threading.RLock(),list=lambda:[])
     bundle={'snapshot':{'frozen_contract':candidate,'task_envelopes':envelopes},
-            'handoff':{'requirements':[{'requirement':'SPEC-CONTROL#R1'}],
+            'handoff':{**{name: 'test-only-'+name for name in ('handoff_id','contract_id','snapshot_hash','tenant_id',
+                'project_group_id','work_item_id','work_program_id','work_program_hash','commissioner_principal_ref','consents_hash')},
+                       'native_contract_hash':candidate['document_hash'],
+                       'requirements':[{'requirement':'SPEC-CONTROL#R1'}],
                        'performer_principal_ref':'member:'+hashlib.sha256(b'performer').hexdigest()[:32]}}
-    return SimpleNamespace(manager=manager,native=native,envelope=envelope,plan=plan,draft=draft,bundle=bundle,files=paths)
+    key=Ed25519PrivateKey.generate();public=key.public_key().public_bytes_raw()
+    key_id='ed25519:sha256:'+hashlib.sha256(public).hexdigest()
+    manager.trust=SimpleNamespace(association_keys={key_id:public})
+    association={k:v for k,v in bundle['handoff'].items() if k!='requirements'}
+    association.update(handoff_document_hash=G.document_hash(bundle['handoff']),handoff_envelope_hash=G.envelope_hash(bundle['handoff']),
+        requirement='SPEC-CONTROL#R1',task_envelope_hash=envelopes['R1']['document_hash'])
+    def signed(document,purpose=BIND_PURPOSE):
+        body={k:v for k,v in document.items() if k!='signature'}
+        return {**body,'signature':{'algorithm':'Ed25519','key_id':key_id,
+            'value':base64.urlsafe_b64encode(key.sign(G._platform_signature_payload(body,purpose=purpose))).rstrip(b'=').decode()}}
+    return SimpleNamespace(manager=manager,native=native,envelope=envelope,plan=plan,draft=draft,bundle=bundle,
+        files=paths,association=signed(association),signed=signed)
 
 
 def test_read_or_import_cannot_install_a_different_current_profile(world):
@@ -76,7 +94,9 @@ def test_read_or_import_cannot_install_a_different_current_profile(world):
 
 
 def test_explicit_revision_install_uses_real_core_and_keeps_old_version(world):
-    current=world.manager._preflight(world.bundle,'SPEC-CONTROL#R1',install_revision=True)
+    current=world.manager._preflight(world.bundle,'SPEC-CONTROL#R1',review_revision=True)
+    assert all((world.manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+    install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=world.association)
     assert current.contract==world.bundle['snapshot']['frozen_contract']
     assert current.task_envelope['budgets']==world.envelope['budgets']
     assert json.loads((world.manager.workspace/'acceptance/work-plan.json').read_bytes())==world.draft
@@ -95,8 +115,76 @@ def test_invalid_or_foreign_revision_never_writes_native_inputs(world,change):
     if change=='scope':e['allowed_writes'].append('private/key')
     if change=='predecessor':n['supersedes_hash']='sha256:'+'f'*64
     if change=='network':n['acceptance_scheme']['environment']['network_mode']='host'
-    if change=='actor':world.manager.actor_id='other-person'
+    if change=='actor':world.bundle['handoff']['performer_principal_ref']='member:'+hashlib.sha256(b'other-person').hexdigest()[:32]
     if change=='busy':world.manager.run_manager.list=lambda:[{'status':'running'}]
     s['frozen_contract']=seal(n);s['task_envelopes']['R1']=seal({**e,'contract_hash':s['frozen_contract']['document_hash']})
-    with pytest.raises(ExecutionIntentError):world.manager._preflight(world.bundle,'SPEC-CONTROL#R1',install_revision=True)
+    with pytest.raises(ValueError):install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=world.association)
     assert all((world.manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+
+
+def test_process_role_is_not_mistaken_for_the_authenticated_sso_performer(world):
+    world.manager.actor_id='studio:implementation'
+    current=world.manager._preflight(world.bundle,'SPEC-CONTROL#R1',review_revision=True)
+    assert current.actor_id=='studio:implementation'
+    assert all((world.manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+    installed=install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=world.association)
+    assert installed['contract']==world.bundle['snapshot']['frozen_contract']
+
+
+@pytest.mark.parametrize('change',['unsigned','tamper','wrong_purpose','foreign_performer','foreign_handoff','foreign_envelope'])
+def test_no_revision_install_before_authentic_same_performer_ack(world,change):
+    ack=copy.deepcopy(world.association)
+    if change=='unsigned':ack.pop('signature')
+    if change=='tamper':ack['performer_principal_ref']='member:other'
+    if change=='wrong_purpose':ack=world.signed(ack,'other.operation')
+    if change=='foreign_performer':ack=world.signed({**ack,'performer_principal_ref':'member:other'})
+    if change=='foreign_handoff':ack=world.signed({**ack,'handoff_id':'different-handoff'})
+    if change=='foreign_envelope':ack=world.signed({**ack,'task_envelope_hash':'sha256:'+'a'*64})
+    with pytest.raises((G.GovernedWorkError,ValueError)):
+        install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=ack)
+    assert all((world.manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+
+
+@pytest.mark.parametrize('ack_allowed',[True,False])
+def test_confirmation_authenticates_performer_before_install_or_dispatch(world,monkeypatch,ack_allowed):
+    """Actual confirmation orchestration and native files; HTTP/signing double."""
+    from apatch_studio import exact_contract_handoffs as H
+    manager=world.manager
+    manager.actor_id='studio:implementation';manager.workspace_id='1'*32
+    manager.clock=lambda:datetime.now(timezone.utc)
+    proposal={'intent_id':'tcapsei_'+'2'*32,'tenant_id':'11111111-1111-4111-8111-111111111111','project_group_id':'tcpg_'+'1'*32,
+        'work_item_id':'tcpwi_'+'2'*32,'work_item_hash':'sha256:'+'3'*64,'authority_version':3,
+        'work_program_id':'tcwp_'+'4'*32,'work_program_hash':'sha256:'+'5'*64,'objective':'TEST-ONLY revised scheme'}
+    world.bundle['legacy_intent']=proposal
+    row={'status':'pending','requirement':None,'run_id':None,'ack':None,'facts':None}
+    manager._update=lambda fn:fn([row]);manager._find=lambda rows,identity:rows[0]
+    manager._read_bundle=lambda row:world.bundle
+    manager._project=lambda row:row.copy()
+    manager._reconcile=lambda **kwargs:None
+    manager.gateway=SimpleNamespace(_workspace_key_provider=lambda:object())
+    monkeypatch.setattr(H.M,'accept_execution_proposal',lambda *args,**kwargs:{'ok':True,'work_started':False,
+        'change':{'change_id':'apchg_'+'6'*32,'spec_hash':world.native['spec_hash']},
+        'proposal_acceptance':{'accepted_at':'2026-10-21T00:00:00Z'}})
+    calls=[]
+    def exchange(*args):
+        assert all((manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+        calls.append('authenticated_ack')
+        if not ack_allowed:raise ValueError('Foreign or revoked performer enrollment')
+        return {'association':world.association}
+    manager._exchange=exchange
+    def prepare(*args):
+        assert manager.sdd.execution_binding('SPEC-CONTROL','R1',actor_id=manager.actor_id)['contract']==world.bundle['snapshot']['frozen_contract']
+        calls.append('prepare_source')
+    manager.delivery=SimpleNamespace(prepare=prepare)
+    def start(*args,**kwargs):
+        calls.append('dispatch');return {'run_id':'apr_'+'7'*32}
+    manager.run_manager.start=start
+    confirmation=SimpleNamespace(workspace_id=manager.workspace_id,requirement='SPEC-CONTROL#R1',runner_id='codex')
+    if ack_allowed:
+        result=manager._confirm(world.bundle['handoff']['handoff_id'],confirmation,for_delivery=True)
+        assert result['status']=='consumed'
+        assert calls==['authenticated_ack','prepare_source','dispatch']
+    else:
+        with pytest.raises(ValueError,match='Foreign or revoked'):manager._confirm(world.bundle['handoff']['handoff_id'],confirmation,for_delivery=True)
+        assert calls==['authenticated_ack']
+        assert all((manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())

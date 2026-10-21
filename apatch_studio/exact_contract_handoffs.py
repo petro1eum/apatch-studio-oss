@@ -347,7 +347,7 @@ class ExactContractManager:
     def _project(row):
         return {key:row[key] for key in ('handoff_id','intent_id','status','requirement','run_id','bundle_hash')}
 
-    def _preflight(self, bundle, requirement, *, install_revision=False):
+    def _preflight(self, bundle, requirement, *, review_revision=False):
         match = REQUIREMENT.fullmatch(requirement)
         if match is None or requirement not in {x['requirement'] for x in bundle['handoff']['requirements']}:
             denied('This requirement was not agreed', 'exact_requirement_mismatch')
@@ -355,11 +355,13 @@ class ExactContractManager:
             denied('Existing local execution actor is not configured', 'exact_actor_unavailable', 503)
         current = SddExecutionContext.model_validate(self.sdd.execution_binding(match[1], match[2], actor_id=self.actor_id))
         expected = bundle['snapshot']
-        if (install_revision and current.contract.get('document_hash') != expected['frozen_contract'].get('document_hash')
+        revision_plan = None
+        if (review_revision and current.contract.get('document_hash') != expected['frozen_contract'].get('document_hash')
                 and expected['frozen_contract'].get('acceptance_scheme') is not None):
-            from apatch_studio.exact_scheme_revision import install_revision as install_scheme
+            from apatch_studio.exact_scheme_revision import review_revision as review_scheme
             try:
-                current = SddExecutionContext.model_validate(install_scheme(self, bundle, requirement))
+                current = SddExecutionContext.model_validate(review_scheme(self, bundle, requirement))
+                revision_plan = current.contract['acceptance_scheme']
             except (ValueError, OSError):
                 denied('The new agreed scheme could not be installed safely', 'exact_revision_unconfirmed')
         if (raw_canonical(current.contract) != raw_canonical(expected['frozen_contract'])
@@ -398,6 +400,10 @@ class ExactContractManager:
                     denied('The agreed judge asset path is invalid', 'exact_judge_drift')
                 with StateDirectory(self.workspace / relative.parent) as directory:
                     data = directory.read_bytes(relative.name, limit=MAX_DOCUMENT)
+                if revision_plan is not None and asset['path'] == 'acceptance/work-plan.json':
+                    # The predecessor file was already verified. Review the
+                    # incoming immutable plan in memory, before any write.
+                    data = S.canonical_json(revision_plan).encode('utf-8')
                 if 'sha256:' + hashlib.sha256(data).hexdigest() != asset['sha256']:
                     denied('An immutable local judge asset changed', 'exact_judge_drift')
         return current
@@ -587,7 +593,7 @@ class ExactContractManager:
             # disconnect fence; the provider is the already enrolled identity.
             provider = self.gateway._workspace_key_provider()
             bundle = self._read_bundle(row)
-            sdd = self._preflight(bundle, confirmation.requirement, install_revision=True)
+            sdd = self._preflight(bundle, confirmation.requirement, review_revision=True)
             if for_delivery and 'apatch_attest' not in sdd.task_envelope['tools']:
                 denied('The agreed envelope does not authorize an attested delivery cycle', 'exact_delivery_contract_required')
             h, proposal = bundle['handoff'], bundle['legacy_intent']
@@ -606,6 +612,11 @@ class ExactContractManager:
                 'raw_spec_hash':sdd.contract['spec_hash'],'native_spec_hash':change['spec_hash'],
                 'proposal_acceptance_hash':G.envelope_hash(acceptance),'accepted_at':acceptance['accepted_at']}
             ack = self._exchange(bundle, facts, change, acceptance)
+            local = self.sdd.execution_binding(sdd.spec_id, sdd.requirement_id, actor_id=self.actor_id)
+            if local['contract_hash'] != sdd.contract_hash:
+                from apatch_studio.exact_scheme_revision import install_revision
+                install_revision(self, bundle, confirmation.requirement, association=ack['association'])
+                self._preflight(bundle, confirmation.requirement)
             def record_ack(rows):
                 current = self._find(rows,handoff_id)
                 if current['status'] != 'consuming' or current['requirement'] != confirmation.requirement:
