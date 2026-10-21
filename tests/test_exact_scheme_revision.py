@@ -188,3 +188,55 @@ def test_confirmation_authenticates_performer_before_install_or_dispatch(world,m
         with pytest.raises(ValueError,match='Foreign or revoked'):manager._confirm(world.bundle['handoff']['handoff_id'],confirmation,for_delivery=True)
         assert calls==['authenticated_ack']
         assert all((manager.workspace/p).read_bytes()==raw for p,raw in world.files.items())
+
+
+@pytest.mark.parametrize('stage',['start','pre_popen'])
+@pytest.mark.parametrize('failure',[None,'revoked','budget'])
+def test_admitted_retry_refreshes_authority_and_preserves_the_native_budget(world,monkeypatch,stage,failure):
+    """Real native budget; authority/transport doubles, not a live grant."""
+    from apatch_studio import exact_contract_handoffs as H
+    from apatch.task_budget import TaskBudget
+    import time
+    m=world.manager
+    current=m._preflight(world.bundle,'SPEC-CONTROL#R1',review_revision=True)
+    proposal={k:'TEST-ONLY-'+k for k in ('intent_id','tenant_id','project_group_id','work_item_id','work_item_hash','authority_version','work_program_id','work_program_hash')}
+    world.bundle['legacy_intent']=proposal
+    world.bundle['handoff']['expires_at']='2026-10-20T00:00:00Z'
+    ctx=SimpleNamespace(**proposal,document_hash=G.document_hash(proposal),envelope_hash=G.envelope_hash(proposal))
+    row={'intent_id':proposal['intent_id'],'handoff_id':'TEST-ONLY','status':'consumed',
+        'requirement':'SPEC-CONTROL#R1','ack':{'ORIGINAL':'TEST-ONLY'},'facts':{'change_id':'TEST-ONLY'}}
+    m._update=lambda fn:fn([row]);m._preflight=lambda *args,**kw:current
+    m._delivery_attempt=lambda row:{'status':'succeeded' if stage=='start' else 'running',
+        'can_retry':True,'retry_of':None if stage=='start' else 'prior-run'}
+    calls=[]
+    def bundle(row,*,historical):assert historical is True;return world.bundle
+    m._read_bundle=bundle;m.clock=lambda:datetime(2026,10,21,tzinfo=timezone.utc)
+    m.gateway=SimpleNamespace(_workspace_key_provider=lambda:object())
+    source=SimpleNamespace(source_binding_id='TEST-ONLY',source_binding_hash='TEST-ONLY')
+    m.delivery=SimpleNamespace(selected=lambda identity:{'context':source},guard_context=lambda *args:source)
+    m.trust.validate_bundle=lambda *args,**kw:calls.append(('current_bundle',kw['historical']))
+    monkeypatch.setattr(H.G,'load_change',lambda *args:{'change_id':'TEST-ONLY'})
+    monkeypatch.setattr(H.P,'acceptance_path',lambda *args:'TEST-ONLY')
+    monkeypatch.setattr(H,'read_json',lambda *args,**kw:{'TEST_ONLY':True})
+    monkeypatch.setattr(H.W,'validate_acceptance',lambda doc:doc)
+    def exchange(*args,**kw):
+        assert kw['historical'] is True and kw['original_ack']==row['ack'] and kw['source_context']==source
+        calls.append(('fresh_server_revalidation',True))
+        if failure=='revoked':raise ValueError('Current authority revoked')
+        return row['ack']
+    m._exchange=exchange
+    budget=TaskBudget(str(m.workspace),current.task_envelope)
+    before=budget.check()
+    if failure=='budget':
+        actual=time.time();monkeypatch.setattr('apatch.task_budget.time.time',lambda:actual+3601)
+    request=SimpleNamespace(mode='requirement',spec_id=current.spec_id,requirement_id=current.requirement_id)
+    if failure is None:
+        assert m.guard_execution(request,ctx,current,stage=stage)==source
+        after=budget.check()
+        assert after['started_at']==before['started_at'] and after['deadline']==before['deadline']
+        assert calls==[('fresh_server_revalidation',True),('current_bundle',True)]
+    else:
+        with pytest.raises((ValueError,ExecutionIntentError)):
+            m.guard_execution(request,ctx,current,stage=stage)
+        assert not any(c[0]=='current_bundle' for c in calls)
+        if failure=='budget':assert calls==[]

@@ -23,7 +23,7 @@ SCHEMA = "trustchain.cowork.studio-artifacts.v1"
 LIMIT = 2 * 1024 * 1024
 
 
-def verify_run_outputs(manager, source_binding_id, built, candidates, files):
+def verify_run_outputs(manager, source_binding_id, built, candidates, files, expected_profile=None):
     """Reuse native source-bound attestations and OSS persisted-record crypto.
 
     A current working-tree hash or mutable notarization cache is insufficient.
@@ -69,6 +69,17 @@ def verify_run_outputs(manager, source_binding_id, built, candidates, files):
         eligible = [r for r in eligible if _ledger_entry_order(r) < _ledger_entry_order(
             attestations[r["payload"].get("governed_session_id", r["payload"].get("session_id"))])]
         if not eligible:
+            # A new agreed scheme can reverify already-correct source without
+            # inventing a mutation. Only a fresh signature-bound native content
+            # snapshot for this exact current profile can qualify those bytes.
+            from apatch_studio.exact_verified_outputs import verified_content
+            if expected_profile is not None:
+                try:
+                    witnesses = [verified_content(manager, a, *expected_profile) for a in attestations.values()]
+                    if witnesses and all(w.get(path, {}).get('sha256') == 'sha256:' + hashlib.sha256(files[path]).hexdigest() for w in witnesses):
+                        continue
+                except (ValueError, OSError, KeyError, TypeError):
+                    pass
             denied("This output was not recorded by the attested run", "artifact_output_unconfirmed")
         row = max(eligible, key=_ledger_entry_order)
         digest = row["payload"]["files"][path].get("sha256", "")
@@ -159,7 +170,9 @@ def build_package(manager, handoff_id, run_id):
         key_provider=manager.gateway._workspace_key_provider(), issued_at=manager.delivery.evidence_time(handoff_id))
     if built["evidence_bundle_hash"] != ready["evidence_bundle_hash"]:
         denied("Native evidence changed during delivery", "artifact_native_evidence_changed")
-    verify_run_outputs(manager, source["source_binding_id"], built, candidates, files)
+    envelope = next(e for e in snapshot['task_envelopes'].values() if e['requirement'] == row['requirement'])
+    verify_run_outputs(manager, source["source_binding_id"], built, candidates, files,
+        (snapshot['frozen_contract'], envelope))
     if any(read_exact(manager.workspace, p) != data for p, data in files.items()):
         denied("An artifact changed during preparation", "artifact_content_changed")
     manifest = G.sign_document({"schema": SCHEMA,

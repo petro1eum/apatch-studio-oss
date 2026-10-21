@@ -663,13 +663,30 @@ class ExactContractManager:
             denied('Exact association was not acknowledged', 'exact_ack_required')
         if request.mode != 'requirement' or sdd_execution is None:
             denied('Exact work requires the genuine native requirement context', 'exact_requirement_context_required')
-        historical = stage == 'build_evidence'
-        if historical:
+        continuation = False
+        if stage in ('start', 'pre_popen') and row['status'] == 'consumed' and self.delivery.selected(row['handoff_id']) is not None:
+            attempt = self._delivery_attempt(row)
+            continuation = bool(attempt is not None and (
+                (stage == 'start' and (attempt['status'] in ('failed', 'cancelled', 'interrupted')
+                    or (attempt['status'] == 'succeeded' and attempt.get('can_retry') is True)))
+                or (stage == 'pre_popen' and attempt.get('retry_of') is not None
+                    and attempt['status'] in ('queued', 'running'))))
+        historical = stage == 'build_evidence' or continuation
+        if stage == 'build_evidence':
             attempt = self._delivery_attempt(row)
             if attempt is None or attempt['status'] != 'succeeded':
                 denied('Historical evidence requires a successful admitted attempt', 'exact_delivery_run_incomplete')
         bundle = self._read_bundle(row, historical=historical)
         current = self._preflight(bundle,row['requirement'])
+        if continuation:
+            # Resume the already admitted operation, not the expired transfer
+            # token. The server revalidates its original ACK and active parties
+            # below; the SAME durable task budget must still permit execution.
+            from apatch.task_budget import TaskBudget, TaskBudgetError
+            try:
+                TaskBudget(str(self.workspace), current.task_envelope).check()
+            except TaskBudgetError:
+                denied('The original task budget does not permit continuation', 'exact_task_budget_exhausted')
         if (raw_canonical(current.model_dump()) != raw_canonical(sdd_execution.model_dump())
                 or request.spec_id != current.spec_id or request.requirement_id != current.requirement_id):
             denied('Native dispatch context changed', 'exact_local_contract_mismatch')
