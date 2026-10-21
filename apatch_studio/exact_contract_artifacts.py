@@ -141,10 +141,15 @@ def build_package(manager, handoff_id, run_id):
     try:
         plan = json.loads(raw_plan)
         candidates = plan["candidate_paths"]
-        if (plan["schema"] != "trustchain.cowork.acceptance-plan.v1" or not isinstance(candidates, list)
+        if (plan["schema"] not in {"trustchain.cowork.acceptance-plan.v1","trustchain.cowork.acceptance-plan.v2"} or not isinstance(candidates, list)
                 or not 0 < len(candidates) <= 128 or len(set(candidates)) != len(candidates)
                 or any(plan[k] != h[k] for k in ("tenant_id", "project_group_id", "work_item_id"))):
             raise ValueError()
+        if plan['schema']=='trustchain.cowork.acceptance-plan.v2':
+            from .exact_scheme_validation import validate_plan_delta
+            validate_plan_delta(plan,plan,snapshot['task_envelopes'])
+            if {c['check_id'] for c in plan['checks']}!={c['acceptance_id'] for c in obligations}:
+                raise ValueError('acceptance check inventory changed')
     except (ValueError, KeyError, TypeError):
         denied("The agreed artifact inventory is invalid", "artifact_plan_invalid")
     for envelope in snapshot["task_envelopes"].values():
