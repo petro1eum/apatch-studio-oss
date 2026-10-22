@@ -106,6 +106,73 @@ def test_explicit_revision_install_uses_real_core_and_keeps_old_version(world):
     assert world.manager._preflight(world.bundle,'SPEC-CONTROL#R1').contract_hash==current.contract_hash
 
 
+def test_same_plan_continuation_keeps_old_expired_budget_and_requires_a_fresh_signed_ack(world, monkeypatch):
+    """Real Core files/crypto, synthetic two-party ACK and test-only clock.
+
+    No live identity/consent or website execution is claimed by this harness.
+    """
+    from apatch.task_budget import TaskBudget, TaskBudgetError
+    import apatch.task_budget as budget_module
+    install_revision(world.manager, world.bundle, 'SPEC-CONTROL#R1', association=world.association)
+    previous = copy.deepcopy(world.bundle['snapshot'])
+    immutable = {p:(world.manager.workspace/p).read_bytes() for p in world.files
+                 if not p.startswith('.apatch/')}
+    now = [1000.0]
+    monkeypatch.setattr(budget_module.time, 'time', lambda:now[0])
+    old_budget = TaskBudget(str(world.manager.workspace), previous['task_envelopes']['R1'])
+    old_budget.check()
+    now[0] += 1801
+    with pytest.raises(TaskBudgetError, match='seconds_exhausted'):
+        old_budget.check()
+    expired = old_budget.path.read_bytes()
+    candidate = seal(dict(previous['frozen_contract'], supersedes_hash=previous['frozen_contract']['document_hash']))
+    envelopes = {rk:seal(dict(env, contract_hash=candidate['document_hash']))
+                 for rk,env in previous['task_envelopes'].items()}
+    world.bundle['snapshot'] = dict(frozen_contract=candidate, task_envelopes=envelopes)
+    world.bundle['handoff'].update(handoff_id='test-only-new-continuation', native_contract_hash=candidate['document_hash'])
+    ack = {k:v for k,v in world.bundle['handoff'].items() if k!='requirements'}
+    ack.update(handoff_document_hash=G.document_hash(world.bundle['handoff']),
+        handoff_envelope_hash=G.envelope_hash(world.bundle['handoff']), requirement='SPEC-CONTROL#R1',
+        task_envelope_hash=envelopes['R1']['document_hash'])
+    # The former, correctly signed ACK is still not approval of this window.
+    with pytest.raises(ValueError):
+        install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=world.association)
+    assert old_budget.path.read_bytes() == expired
+    renewed = install_revision(world.manager,world.bundle,'SPEC-CONTROL#R1',association=world.signed(ack))
+    assert renewed['task_envelope']['budgets'] == previous['task_envelopes']['R1']['budgets']
+    assert all((world.manager.workspace/p).read_bytes()==raw for p,raw in immutable.items())
+    assert old_budget.path.read_bytes() == expired
+    # Installation never starts or refunds execution. The subsequent admitted
+    # task has its own hash-keyed, equally bounded budget; old state is retained.
+    new_budget = TaskBudget(str(world.manager.workspace), envelopes['R1'])
+    assert new_budget.path != old_budget.path and not new_budget.path.exists()
+    new_state = new_budget.check()
+    assert new_state['started_at'] == now[0] and new_state['seconds_remaining'] == 1800
+    assert old_budget.path.read_bytes() == expired
+    archived = world.manager.workspace/'.apatch/sdd/frozen'/(previous['frozen_contract']['document_hash'].split(':')[1]+'.json')
+    assert json.loads(archived.read_bytes()) == previous['frozen_contract']
+
+
+@pytest.mark.parametrize('change', ['budget','write_scope','command','judge','inventory','baseline','predecessor'])
+def test_continuation_same_plan_is_not_permission_to_change_frozen_acceptance(world, change):
+    previous = world.bundle['snapshot']['frozen_contract']
+    previous_envelopes = world.bundle['snapshot']['task_envelopes']
+    candidate = copy.deepcopy(previous)
+    candidate['supersedes_hash'] = previous['document_hash']
+    envelopes = copy.deepcopy(previous_envelopes)
+    if change == 'budget': envelopes['R1']['budgets']['seconds'] += 1
+    if change == 'write_scope': envelopes['R1']['allowed_writes'].append('private/key')
+    if change == 'command': candidate['obligations'][0]['command'] = ['true']
+    if change == 'judge': candidate['obligations'][0]['judge_assets'][1]['sha256'] = 'sha256:'+'f'*64
+    if change == 'inventory': candidate['obligations'][0]['expected_case_ids'] = []
+    if change == 'baseline': candidate['baseline_hash'] = 'sha256:'+'f'*64
+    if change == 'predecessor': candidate['supersedes_hash'] = 'sha256:'+'f'*64
+    candidate = seal(candidate)
+    envelopes = {rk:seal(dict(env,contract_hash=candidate['document_hash'])) for rk,env in envelopes.items()}
+    with pytest.raises(ValueError):
+        validate_revision(previous,previous_envelopes,candidate,envelopes,world.draft)
+
+
 @pytest.mark.parametrize('change',['budget','command','inventory','scope','predecessor','network','actor','busy'])
 def test_invalid_or_foreign_revision_never_writes_native_inputs(world,change):
     s=world.bundle['snapshot'];n=s['frozen_contract'];e=s['task_envelopes']['R1']
