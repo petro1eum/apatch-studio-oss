@@ -80,7 +80,7 @@ def test_runner_catalog_and_argv_are_allowlisted():
         "--cd",
         "/fixed/workspace",
         "--approve-for-me",
-        *RunnerCatalog._codex_mcp_overrides(),
+        *RunnerCatalog._codex_mcp_overrides(workspace),
         "-",
     ]
     assert claude == [
@@ -92,7 +92,7 @@ def test_runner_catalog_and_argv_are_allowlisted():
         "--permission-mode",
         "auto",
         "--mcp-config",
-        json.dumps({"mcpServers": {"apatch": RunnerCatalog.apatch_mcp_server()}}, sort_keys=True),
+        json.dumps({"mcpServers": {"apatch": RunnerCatalog.apatch_mcp_server(workspace)}}, sort_keys=True),
         "--strict-mcp-config",
     ]
     joined = " ".join(codex + claude)

@@ -119,7 +119,7 @@ class RunnerCatalog:
                 "--cd",
                 str(workspace),
                 "--approve-for-me",
-                *self._codex_mcp_overrides(),
+                *self._codex_mcp_overrides(workspace),
                 "-",
             ]
         return [
@@ -131,20 +131,22 @@ class RunnerCatalog:
             "--permission-mode",
             "auto",
             "--mcp-config",
-            json.dumps({"mcpServers": {"apatch": self.apatch_mcp_server()}}, sort_keys=True),
+            json.dumps({"mcpServers": {"apatch": self.apatch_mcp_server(workspace)}}, sort_keys=True),
             "--strict-mcp-config",
         ]
 
     @staticmethod
-    def apatch_mcp_server() -> dict[str, Any]:
+    def apatch_mcp_server(workspace: Path | None = None) -> dict[str, Any]:
         """The exact apatch MCP server every runner must use (REC-db629a7ee98f).
 
         Studio never relies on the consumer's ``.apatch/mcp.json`` or on a user's
         global runner configuration: those default to the compact 15-tool profile,
         which lacks the governed mutation tools a plan needs, and the failure is
         silent ("completed without one new reviewable plan"). The runner gets the
-        interpreter that runs Studio, the plain launcher bound to the workspace by
-        cwd, and the full professional catalog.
+        interpreter that runs Studio, the plain launcher explicitly bound to the
+        canonical workspace, and the full professional catalog. Introspection may
+        omit the workspace, but runner commands must always supply it: global
+        runner configuration can otherwise select a different MCP working folder.
         """
 
         env = {
@@ -156,6 +158,8 @@ class RunnerCatalog:
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
         }
+        if workspace is not None:
+            env["APATCH_MCP_BOUND"] = str(workspace.resolve())
         command = apatch_python_command("apatch.mcp.launcher")
         return {
             "command": command[0],
@@ -164,12 +168,12 @@ class RunnerCatalog:
         }
 
     @classmethod
-    def _codex_mcp_overrides(cls) -> list[str]:
-        server = cls.apatch_mcp_server()
-        env_table = ", ".join(f'{key}="{value}"' for key, value in server["env"].items())
-        return [
+    def _codex_mcp_overrides(cls, workspace: Path | None = None) -> list[str]:
+        server = cls.apatch_mcp_server(workspace)
+        env_table = ", ".join(f'{key}={json.dumps(value)}' for key, value in server["env"].items())
+        overrides = [
             "-c",
-            f'mcp_servers.apatch.command="{server["command"]}"',
+            "mcp_servers.apatch.command=" + json.dumps(server["command"]),
             "-c",
             "mcp_servers.apatch.args=" + json.dumps(server["args"]),
             "-c",
@@ -177,6 +181,9 @@ class RunnerCatalog:
             "-c",
             "mcp_servers.apatch.enabled=true",
         ]
+        if workspace is not None:
+            overrides.extend(["-c", "mcp_servers.apatch.cwd=" + json.dumps(str(workspace.resolve()))])
+        return overrides
 
     def planning_command(self, runner: RunnerId, workspace: Path) -> list[str]:
         """Use a latency-oriented profile only for contract preparation."""
