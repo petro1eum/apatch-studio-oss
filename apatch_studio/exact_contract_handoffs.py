@@ -564,10 +564,17 @@ class ExactContractManager:
             spec_id=sdd.spec_id,requirement_id=sdd.requirement_id),external,sdd,stage='build_evidence')
         if current is None:
             denied('The exact source lineage is unavailable', 'exact_source_ack_required')
-        built = G.build_workspace_evidence(str(self.workspace),binding_id=current.source_binding_id,
-            key_provider=self.gateway._workspace_key_provider(),issued_at=self.delivery.evidence_time(handoff_id))
-        if built['change_id'] != current.change_id or built['change_hash'] != current.change_hash:
-            denied('Native evidence belongs to another Change', 'exact_source_ack_invalid')
+        from apatch_studio.exact_native_evidence import build_or_reuse_workspace_evidence
+        try:
+            built = build_or_reuse_workspace_evidence(str(self.workspace),binding_id=current.source_binding_id,
+                key_provider=self.gateway._workspace_key_provider(),issued_at=self.delivery.evidence_time(handoff_id))
+        except (G.GovernedWorkError, ValueError, OSError):
+            denied('The current native evidence could not be confirmed', 'exact_evidence_unconfirmed')
+        if (built.get('binding_id') != current.source_binding_id
+                or built.get('binding_hash') != current.source_binding_hash
+                or built.get('change_id') != current.change_id
+                or built.get('change_hash') != current.change_hash):
+            denied('Native evidence belongs to another source or Change', 'exact_source_ack_invalid')
         return {'schema':'apatch.studio.exact-contract-evidence-ready.v1','handoff_id':handoff_id,'run_id':run_id,
             'source_binding_id':current.source_binding_id,'source_binding_hash':current.source_binding_hash,
             'change_id':current.change_id,'change_hash':current.change_hash,

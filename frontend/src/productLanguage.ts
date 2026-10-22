@@ -14,6 +14,7 @@ export function changeState(run: AgentRun): ProductState {
   if (run.status === "succeeded" && run.mode === "new_change") {
     return { label: "Plan unavailable", tone: "warning" };
   }
+  if (run.status === "succeeded" && !run.contribution) return { label: "Execution finished", tone: "info" };
   if (run.status === "succeeded") return { label: "Verified", tone: "success" };
   if (run.status === "failed" || run.status === "interrupted") {
     return { label: "Needs attention", tone: "danger" };
@@ -21,6 +22,16 @@ export function changeState(run: AgentRun): ProductState {
   if (run.status === "cancelled") return { label: "Stopped", tone: "warning" };
   if (run.status === "queued") return { label: "Queued", tone: "neutral" };
   return { label: "In progress", tone: "info" };
+}
+
+/** Process exit is not a test verdict; only exact current native evidence is. */
+export function exactLocalVerificationState(status: string | null, runId: string | null,
+  evidence: { run_id: string; attestation_count: number; contribution_event_count: number } | null
+): "verified" | "finished" | "running" | "notRun" {
+  if (status === "succeeded" && runId && evidence?.run_id === runId
+      && evidence.attestation_count > 0 && evidence.contribution_event_count > 0) return "verified";
+  if (status === "succeeded") return "finished";
+  return runId ? "running" : "notRun";
 }
 
 export function proofState(run: AgentRun): ProductState {

@@ -171,8 +171,18 @@ def build_package(manager, handoff_id, run_id):
     if any(next(p["sha256"] for p in pins if p["path"] == path) != digest for path, digest in judges.items()):
         denied("An immutable check changed", "artifact_content_changed")
     source = manager.delivery.selected(handoff_id)["context"]
-    built = G.build_workspace_evidence(str(manager.workspace), binding_id=source["source_binding_id"],
-        key_provider=manager.gateway._workspace_key_provider(), issued_at=manager.delivery.evidence_time(handoff_id))
+    from apatch_studio.exact_native_evidence import build_or_reuse_workspace_evidence
+    try:
+        try:
+            built = G.build_workspace_evidence(str(manager.workspace), binding_id=source["source_binding_id"],
+                key_provider=manager.gateway._workspace_key_provider(), issued_at=manager.delivery.evidence_time(handoff_id))
+        except G.GovernedWorkError:
+            # The native agent may already have stored the immutable pair.
+            # Reuse is allowed only after fresh facts and full issuer validation.
+            built = build_or_reuse_workspace_evidence(str(manager.workspace), binding_id=source["source_binding_id"],
+                key_provider=manager.gateway._workspace_key_provider(), issued_at=manager.delivery.evidence_time(handoff_id))
+    except (G.GovernedWorkError, ValueError, OSError):
+        denied("The current native evidence could not be confirmed", "artifact_output_unconfirmed")
     if built["evidence_bundle_hash"] != ready["evidence_bundle_hash"]:
         denied("Native evidence changed during delivery", "artifact_native_evidence_changed")
     envelope = next(e for e in snapshot['task_envelopes'].values() if e['requirement'] == row['requirement'])

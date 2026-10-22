@@ -173,3 +173,33 @@ def test_signed_mutation_payload_tampering_cannot_be_exported_as_a_native_output
     (n.objects/"op_0001.json").write_text(json.dumps(n.mutation))
     with pytest.raises(ExecutionIntentError):
         a.verify_run_outputs(n.manager,n.source["binding_id"],n.built,[n.path],{n.path:b"forged"})
+
+
+def test_artifact_immutable_collision_uses_strict_reuse_adapter(scenario, monkeypatch):
+    """Transport routing double; actual reuse/crypto is tested separately."""
+    from apatch_studio import exact_native_evidence
+    built=G.build_workspace_evidence(str(scenario.manager.workspace))
+    def conflict(*args,**kwargs):
+        raise G.GovernedWorkError('immutable document already bound')
+    monkeypatch.setattr(G,'build_workspace_evidence',conflict)
+    reuse=Mock(return_value=built)
+    monkeypatch.setattr(exact_native_evidence,'build_or_reuse_workspace_evidence',reuse)
+    package,current=a.build_package(scenario.manager,'tceh_'+'1'*32,'apr_'+'2'*32)
+    assert current==built and len(package['files'])==len(scenario.files)
+    reuse.assert_called_once_with(str(scenario.manager.workspace),binding_id='tcpsb_'+'a'*32,
+        key_provider=scenario.provider,issued_at='2026-10-20T00:00:00Z')
+
+
+@pytest.mark.parametrize('failure',[G.GovernedWorkError,ValueError,OSError])
+def test_artifact_reuse_refusal_is_409_without_export(scenario,monkeypatch,failure):
+    """A failed strict fallback never becomes an artifact package or HTTP 500."""
+    from apatch_studio import exact_native_evidence
+    def conflict(*args,**kwargs):
+        raise G.GovernedWorkError('immutable document already bound')
+    monkeypatch.setattr(G,'build_workspace_evidence',conflict)
+    reuse=Mock(side_effect=failure('native proof not confirmed'))
+    monkeypatch.setattr(exact_native_evidence,'build_or_reuse_workspace_evidence',reuse)
+    with pytest.raises(ExecutionIntentError) as exc:
+        a.build_package(scenario.manager,'tceh_'+'1'*32,'apr_'+'2'*32)
+    assert exc.value.status_code==409 and exc.value.code=='artifact_output_unconfirmed'
+    reuse.assert_called_once()

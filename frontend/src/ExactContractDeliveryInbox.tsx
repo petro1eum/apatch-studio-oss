@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { RunnerInfo, WorkspaceOverview } from "./types";
+import { exactLocalVerificationState } from "./productLanguage";
 import {
   ExactDeliveryApiError, buildExactEvidence, importExactContract, listExactContracts,
   previewExactEvidence, publishExactEvidence, readExactChoices, readExactDelivery,
@@ -18,7 +19,7 @@ const words = {
     queued: "Waiting for a valid platform receipt. The customer still decides; work is not accepted.",
     cached: "Previously recorded delivery; a new receipt was not checked. The customer still decides.",
     local: "Evidence is ready locally. Nothing has been published.", notRun: "Execution has not started.", running: "Local execution is not yet verified.",
-    verified: "Local tests passed. This is evidence, not customer acceptance.", ack: "Source acknowledgement received.",
+    verified: "Local tests passed. This is evidence, not customer acceptance.", finished: "The agent finished. Prepare signed evidence to confirm the agreed tests.", ack: "Source acknowledgement received.",
     sourceWaiting: "Source acknowledgement is still pending; execution/evidence is not ready.", recipient: "Recipient", selection: "Selection",
     bundle: "Evidence record", time: "Time record", proof: "Agreement and proof references", requirement: "Agreed requirement",
     error: "This operation could not be completed. Refresh the selected contract before retrying.", changed: "The workspace, account or selection changed. Open the current contract and preview again.",
@@ -38,7 +39,7 @@ const words = {
     queued: "Ждём действительную квитанцию платформы. Работа ещё не принята заказчиком.",
     cached: "Доставка ранее отмечена; новая квитанция не проверялась. Решение остаётся за заказчиком.",
     local: "Доказательства готовы локально. Ничего не опубликовано.", notRun: "Выполнение ещё не началось.", running: "Локальное выполнение ещё не проверено.",
-    verified: "Локальные тесты прошли. Это доказательства, а не приёмка заказчиком.", ack: "Привязка к источнику подтверждена.",
+    verified: "Локальные тесты прошли. Это доказательства, а не приёмка заказчиком.", finished: "Агент завершил работу. Подготовьте подписанные доказательства, чтобы подтвердить согласованные тесты.", ack: "Привязка к источнику подтверждена.",
     sourceWaiting: "Подтверждение источника ещё ожидается; выполнение и доказательства не готовы.", recipient: "Получатель", selection: "Состав",
     bundle: "Запись доказательств", time: "Запись времени", proof: "Ссылки на договор и доказательства", requirement: "Согласованное требование",
     error: "Операцию не удалось завершить. Обновите выбранный договор перед повтором.", changed: "Рабочая область, аккаунт или выбор изменились. Откройте текущий договор и проверьте состав заново.",
@@ -150,12 +151,14 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
     if (!selected) return;
     void act("refresh", async (signal, stamp) => {
       const result = await readExactDelivery(selected.handoff_id, signal);
+      if (current(stamp) && result.run_id !== delivery?.run_id) { setEvidence(null); setPlan(null); setConsent(false); setPublication(null); }
       if (!current(stamp)) return; setDelivery(result);
       if (result.run_id) { const status = await readExactRun(result.run_id, signal); if (current(stamp)) setRunStatus(status); }
     });
   }
   function build() {
     if (!selected || !delivery?.run_id || delivery.status !== "source_acknowledged" || runStatus !== "succeeded") return;
+    setEvidence(null); setPlan(null); setConsent(false); setPublication(null);
     void act("build", async (signal, stamp) => {
       const result = await buildExactEvidence(selected.handoff_id, delivery.run_id!, signal);
       if (!current(stamp)) return;
@@ -201,7 +204,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
             <button className="oi-button oi-button-primary" type="button" data-testid="exact-contract-run" onClick={run}
               disabled={busy !== null || !requirement || !availableRunners.some(item => item.id === runner) || Boolean(delivery?.run_id)}>{t.run}</button>
           </div>
-          <p role="status">{delivery?.status === "pending_source_ack" ? t.sourceWaiting : runStatus === "succeeded" ? t.verified : delivery?.run_id ? t.running : t.notRun}</p>
+          <p role="status">{delivery?.status === "pending_source_ack" ? t.sourceWaiting : t[exactLocalVerificationState(runStatus, delivery?.run_id ?? null, evidence)]}</p>
           <div className="oi-action-row" style={{ flexWrap: "wrap" }}>
             <button className="oi-button oi-button-secondary" type="button" disabled={busy !== null} onClick={refresh}>{t.refresh}</button>
             <button className="oi-button oi-button-secondary" type="button" data-testid="exact-contract-build" onClick={build}
