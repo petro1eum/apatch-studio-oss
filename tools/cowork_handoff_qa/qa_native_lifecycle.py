@@ -244,6 +244,9 @@ class RemoteObserver:
 
 
 def create_session(workspace, *, trust, state_root=None, transport=None, **exact_options):
+    # Match create_app's existing local implementation actor; the owner remains
+    # the separate frozen-contract approver. This is not an identity credential.
+    exact_options.setdefault('actor_id', 'studio:implementation')
     control = RemoteControl(transport=transport)
     runs = OperatorQaRunManager(workspace, control=control, state_root=state_root)
     try:

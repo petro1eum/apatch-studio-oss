@@ -277,3 +277,14 @@ def test_restarted_controller_can_only_recover_existing_exact_observer(native):
     n.row['run_id']='apr_'+'f'*32
     with pytest.raises(Exception):n.control.restore_observer('tceh_'+'7'*32)
     assert len(n.transport.started)==1
+
+
+def test_headless_session_sets_the_existing_local_implementation_actor(tmp_path):
+    runs,exact,observer=q.create_session(tmp_path,trust=object(),state_root=tmp_path/'state')
+    try:
+        assert exact.actor_id=='studio:implementation'
+        assert exact.run_manager is runs and observer.control is runs._handoff_process_control
+        assert exact.run_request_model is q.QaRunRequest
+        assert runs._external_dispatch_guard==exact.guard_execution
+        assert runs.list()==[]
+    finally:runs.close()
