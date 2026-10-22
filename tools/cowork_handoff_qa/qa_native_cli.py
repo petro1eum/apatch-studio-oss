@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--trust-file', type=Path, required=True)
     mode=parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--bundle', type=Path)
+    mode.add_argument('--retry-run', help='Actual failed native run; allocate a normal exact retry')
     mode.add_argument('--resume-stop', help='Retained exact handoff ID; cannot launch a new run')
     parser.add_argument('--requirement')
     parser.add_argument('--state-root', type=Path, required=True)
@@ -39,6 +40,22 @@ def main():
             run = observer.control.restore_observer(handoff_id)
             run_id = run['run_id']
             emit('existing_stop_session', run=run)
+        elif args.retry_run is not None:
+            if args.requirement is not None:
+                parser.error('--retry-run preserves the existing exact requirement')
+            rows = exact._update(lambda rows: [r for r in rows
+                if r['status'] == 'consumed' and exact._delivery_attempt(r) is not None
+                and exact._delivery_attempt(r)['run_id'] == args.retry_run])
+            if len(rows) != 1:
+                parser.error('--retry-run needs one retained exact native association')
+            row = rows[0]
+            handoff_id = row['handoff_id']
+            # The unchanged native manager enforces retryable parent and current
+            # exact/source guard; no caller chooses a new run identity.
+            selected = runs.retry(args.retry_run)
+            run_id = selected['run_id']
+            emit('awaiting_root_admission', run=runs.get(run_id),
+                 binding_id=row['ack']['native_binding']['binding_id'], workspace_id=exact.workspace_id)
         else:
             if args.requirement is None:
                 parser.error('--bundle requires --requirement')
@@ -64,7 +81,7 @@ def main():
                 except Exception as exc:
                     # Exact current server query is public scope/inventory, not a secret.
                     # Operator retains it under root ownership before repeating stop.
-                    emit('stop_pending', reason=type(exc).__name__, authority_query=observer.last_query)
+                    emit('stop_pending', reason=type(exc).__name__, reason_detail=str(exc), authority_query=observer.last_query)
             else:
                 emit('command_rejected', allowed=['status', 'stop', 'quit'])
     finally:

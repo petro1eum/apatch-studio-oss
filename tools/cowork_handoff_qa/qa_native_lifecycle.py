@@ -61,7 +61,7 @@ class FixedSshTransport:
 
     def call(self, operation, **pins):
         result = subprocess.run(self.command(operation, **pins), capture_output=True,
-            text=True, timeout=15, env=self.environment(), cwd='/')
+            stdin=subprocess.DEVNULL, text=True, timeout=15, env=self.environment(), cwd='/')
         if result.returncode != 0 or len(result.stdout.encode()) > 256 * 1024:
             raise StopUnavailable('Fixed Linux operation is unavailable')
         try:
@@ -113,9 +113,16 @@ class RemoteControl:
         rows = self.exact._update(lambda rows: copy.deepcopy(rows))
         matches = [r for r in rows if r['intent_id'] == context.intent_id
                    and r['status'] in ('consuming', 'consumed') and r.get('ack') is not None]
-        if len(matches) != 1 or matches[0].get('run_id') not in (None, run_id):
+        if len(matches) != 1:
             raise StopUnavailable('Run has no unique canonical native association')
-        binding = matches[0]['ack']['native_binding']
+        row = matches[0]
+        if row.get('run_id') not in (None, run_id):
+            # The ordinary manager allocates retries; its persisted exact lineage
+            # must select this one current leaf with unchanged native context.
+            attempt = ExactContractManager._delivery_attempt(self.exact, row)
+            if attempt is None or attempt['run_id'] != run_id:
+                raise StopUnavailable('Run has no unique canonical native association')
+        binding = row['ack']['native_binding']
         from apatch import governed_work_delivery as D
         config = D.load_config(str(self.manager._workspace))
         return {'workspace_id': self.exact.workspace_id, 'request_key_id': config['service_request_key_id'],
@@ -162,11 +169,11 @@ class RemoteControl:
         self.exact._read_bundle(row, historical=True)
         if row['status'] != 'consumed' or row.get('run_id') is None:
             raise StopUnavailable('No existing admitted native run to observe')
-        run = self.manager.get(row['run_id'])
-        if run.get('execution_context') is None:
+        run = ExactContractManager._delivery_attempt(self.exact, row)
+        if run is None or run.get('execution_context') is None:
             raise StopUnavailable('The retained run has no exact context')
         scope = {k: run['execution_context'][k] for k in ('tenant_id', 'project_group_id', 'work_item_id')}
-        expected = self._current(scope, row['run_id'], revalidate=False, for_stop=True)
+        expected = self._current(scope, run['run_id'], revalidate=False, for_stop=True)
         self.admission = self._match(self.transport.call('admission'), scope, expected)
         return run
 

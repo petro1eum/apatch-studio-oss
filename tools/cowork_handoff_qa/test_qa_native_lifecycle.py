@@ -289,3 +289,39 @@ def test_headless_session_sets_the_existing_local_implementation_actor(tmp_path)
         assert runs._external_dispatch_guard==exact.guard_execution
         assert runs.list()==[]
     finally:runs.close()
+
+
+def test_real_manager_retry_keeps_original_exact_row_and_requires_new_run_admission(native):
+    n=native;first=start(n);assert n.transport.entered.wait(2)
+    n.admit(first);running(n,first)
+    n.manager.cancel(first['run_id']);n.manager.wait(first['run_id'],3)
+    original=dict(n.row)
+    n.transport.a=None;n.transport.entered.clear()
+    retry=n.manager.retry(first['run_id'])
+    assert retry['retry_of']==first['run_id'] and retry['run_id']!=first['run_id']
+    assert n.transport.entered.wait(2)
+    # Original association points at the first run forever. Only the actual
+    # native retry edge selects the new leaf; operator admission must be fresh.
+    assert n.row==original and len(n.transport.started)==1
+    a=n.admit(retry);n.row.update(original)
+    process=running(n,retry)
+    assert process.poll() is None and n.transport.started[-1][0]==retry['run_id']
+    assert n.row==original and a['observer']['expected_run_ids']==[retry['run_id']]
+    n.manager.cancel(retry['run_id']);n.manager.wait(retry['run_id'],3)
+    n.control.exact._find=lambda rows,identity:rows[0]
+    n.control.exact._read_bundle=lambda row,**kwargs: {'test':'historical validation boundary'}
+    n.control.admission=None
+    restored=n.control.restore_observer('tceh_'+'7'*32)
+    assert restored['run_id']==retry['run_id'] and restored['retry_of']==first['run_id']
+    assert n.control.admission['observer']['expected_run_ids']==[retry['run_id']]
+    assert len(n.transport.started)==2 and n.row==original
+
+
+def test_diagnostic_ssh_does_not_consume_interactive_native_commands(monkeypatch):
+    captured={}
+    def call(argv,**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0,stdout='{}')
+    monkeypatch.setattr(q.subprocess,'run',call)
+    assert q.FixedSshTransport().call('admission')=={}
+    assert captured['stdin'] is subprocess.DEVNULL

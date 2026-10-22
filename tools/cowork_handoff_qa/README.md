@@ -1,6 +1,6 @@
 # One new Linux handoff QA run
 
-Status: executable local candidate, not deployed/admitted. This is a deterministic
+Status: the source stop/duplicate/fence/transfer path has now run on the server for one separately agreed QA task; successor execution remains open. This is a deterministic
 operator runner for one newly agreed QA task. It uses the existing native
 ExactContractManager, full-delivery source acknowledgement, AgentRunManager and
 RunStore. The native key remains in its enrolled workspace. The work process runs
@@ -125,3 +125,11 @@ through the current signed native query. It never relaunches the container.
 A real Linux positive, recursive drain, repeat/denial and successor launch still
 must be collected before U15-03 is reported complete. This package alone does not
 close U15 or the full release.
+
+## 2026-10-23 actual qualification
+
+The real first image failed before starting the work process because its fixed Python argv was absent. The corrected image retains the exact work bytes and adds the interpreter alias; a real runsc smoke proves Python and required imports before admission. Never reuse/reset that failed root instance. The successful retry used a separate root instance, admission, cgroup and observer key.
+
+A real native retry exposed the need to select the existing exact manager's immutable retry lineage both during dispatch and stop-only restoration. The adapter now uses that resolver. Diagnostic SSH uses DEVNULL so it cannot swallow an interactive native command. The headless `--retry-run` always allocates through the ordinary native manager and retains the original association. `--resume-stop` follows the actual current retry leaf without starting it. 118 current contour/native regression tests pass; existing assertions are preserved.
+
+The actual website transfer request, complete cgroup/attach quiescence, exact duplicate ACK, durable relaunch denial and successor creation are recorded under Platform verification `cowork-native-stop-20261023`. A second consent or a new execution is not inherited by the successor.

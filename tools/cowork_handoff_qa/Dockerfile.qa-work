@@ -1,6 +1,9 @@
 # Root supplies a reviewed linux/amd64 python image by digest, never a mutable tag.
 ARG QA_BASE
 FROM ${QA_BASE}
+USER 0:0
+RUN if [ ! -e /usr/local/bin/python ]; then test -x /usr/bin/python3 && mkdir -p /usr/local/bin && ln -s /usr/bin/python3 /usr/local/bin/python; fi \
+    && /usr/local/bin/python -I -B -c "import json, subprocess, sys; assert sys.version_info >= (3, 10)"
 COPY --chmod=0444 qa_handoff_work.py /opt/cowork-qa/work.py
 USER 1000:1000
 WORKDIR /workspace
