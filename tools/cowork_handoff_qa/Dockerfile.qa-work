@@ -1,0 +1,8 @@
+# Root supplies a reviewed linux/amd64 python image by digest, never a mutable tag.
+ARG QA_BASE
+FROM ${QA_BASE}
+COPY --chmod=0444 qa_handoff_work.py /opt/cowork-qa/work.py
+USER 1000:1000
+WORKDIR /workspace
+ENTRYPOINT []
+CMD ["/usr/local/bin/python", "-I", "-B", "-u", "/opt/cowork-qa/work.py"]

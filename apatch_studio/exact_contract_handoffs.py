@@ -263,10 +263,13 @@ class ExactContractTrust:
 
 class ExactContractManager:
     def __init__(self, workspace, *, run_manager, trust, state_root=None, gateway=None, clock=None,
-                 actor_id=None, sdd_facade=None, http_client_factory=None):
+                 actor_id=None, sdd_facade=None, http_client_factory=None, run_request_model=AgentRunRequest):
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace_id = hashlib.sha256(str(self.workspace).encode()).hexdigest()[:32]
         self.run_manager, self.trust = run_manager, trust
+        if not isinstance(run_request_model, type) or not issubclass(run_request_model, AgentRunRequest):
+            raise TypeError('Exact dispatch requires an AgentRunRequest model')
+        self.run_request_model = run_request_model
         self.store = IntentStore(self.workspace, state_root=state_root)
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.gateway = gateway or APatchGovernedWorkGateway(self.workspace)
@@ -641,7 +644,7 @@ class ExactContractManager:
             context = ExecutionContext(**{name:proposal[name] for name in ('intent_id','tenant_id','project_group_id','work_item_id',
                 'work_item_hash','authority_version','work_program_id','work_program_hash')},
                 document_hash=G.document_hash(proposal),envelope_hash=G.envelope_hash(proposal))
-            run = self.run_manager.start(AgentRunRequest(mode='requirement', runner=confirmation.runner_id,
+            run = self.run_manager.start(self.run_request_model(mode='requirement', runner=confirmation.runner_id,
                 objective=proposal['objective'],spec_id=sdd.spec_id,requirement_id=sdd.requirement_id),
                 execution_context=context,sdd_execution=sdd)
             if not isinstance(run.get('run_id'), str):

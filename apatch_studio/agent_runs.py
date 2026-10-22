@@ -866,6 +866,9 @@ def cleanup_planning_session(workspace: str | os.PathLike[str], run_id: str) -> 
 class AgentRunManager:
     """Bounded durable supervisor for allowlisted local coding agents."""
 
+    # Trusted headless adapters may narrow requests without changing browser schemas.
+    request_model = AgentRunRequest
+
     def __init__(
         self,
         workspace: str | os.PathLike[str],
@@ -950,6 +953,9 @@ class AgentRunManager:
 
     def runners(self) -> list[dict[str, Any]]:
         return self._catalog.projection()
+
+    def _bind_execution_source_artifacts(self, argv, runner, artifacts):
+        return bind_execution_source_artifacts(argv, runner, artifacts)
 
     def _runner_command(self, request: AgentRunRequest) -> list[str]:
         if request.mode == "new_change":
@@ -1141,11 +1147,11 @@ class AgentRunManager:
         except KeyError as exc:
             raise RunNotFoundError(run_id) from exc
 
-    @staticmethod
-    def _restore_record(raw: dict[str, Any]) -> _RunRecord:
+    @classmethod
+    def _restore_record(cls, raw: dict[str, Any]) -> _RunRecord:
         record = _RunRecord(
             run_id=raw["run_id"],
-            request=AgentRunRequest.model_validate(raw["request"]),
+            request=cls.request_model.model_validate(raw["request"]),
             retry_of=raw.get("retry_of"),
             execution_context=(
                 ExecutionContext.model_validate(raw["execution_context"])
@@ -1301,7 +1307,7 @@ class AgentRunManager:
                 self._workspace, record.request, record.execution_context,
                 state_root=self._store.state_root, source_binding_context=source_binding_context,
             )
-            argv = bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
+            argv = self._bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
             prompt = build_governed_prompt(
                 record.request,
                 retry=record.retry_of is not None,

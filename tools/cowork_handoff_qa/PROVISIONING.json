@@ -1,0 +1,57 @@
+{
+  "schema": "trustchain.cowork.qa-handoff-provisioning-plan.v1",
+  "status": "local_candidate_only_not_installed_not_admitted",
+  "production_calls": false,
+  "docker_calls": false,
+  "key_generation": false,
+  "fixed_installation": {
+    "code_root": "/opt/trustchain-cowork-handoff-qa",
+    "state_root": "/var/lib/trustchain-cowork-handoff-qa",
+    "owner": "root:root",
+    "code_file_mode": "0555",
+    "state_directory_mode": "0700",
+    "admission_and_authority_file_mode": "0600",
+    "key_file": "/var/lib/trustchain-cowork-handoff-qa/observer.ed25519",
+    "key_file_mode": "0600"
+  },
+  "key_provisioning": {
+    "status": "NOT_PROVISIONED",
+    "format": "32-byte Ed25519 seed supplied by operator only after concrete review; no generation/import command in this CLI",
+    "purpose": "existing trustchain.cowork.handoff-stop-ack.v1 only; never acceptance.check or performer request signing",
+    "public_pin": "must equal observer.public_key and differ from existing request_key_id; include in exact Platform observer admission"
+  },
+  "prerequisites": [
+    "Root-owned isolated Python interpreter and dependencies; invoke fixed qa_handoff_cli.py with -I -B; no writable PYTHONPATH or caller flags.",
+    "Install the five exact files from installation.prepared.json; retain unchanged StopObserver and StateDirectory from the candidate. No general Studio UI runs as root.",
+    "Create a NEW disposable active work item and normal bilateral exact agreement. qa_native_cli.py uses real ExactContractManager.confirm_for_delivery and AgentRunManager/RunStore to allocate the actual apr before root admission; no fabricated binding/run or parallel allocator.",
+    "Precreate one runsc container with pinned image/argv/environment, no network, UID1000, readonly rootfs, dropped capabilities, no-new-privileges, private namespaces, memory/PID limits and only the exact QA workspace mount.",
+    "Provision a dedicated persistent cgroup-v2 parent for this single run; verify the actual Docker cgroup parent and boot identity. Never substitute a broad system.slice or an existing personal sandbox.",
+    "Create root admission.json with exact scope, one actual binding_id and one actual apr_id, precreated container identity, host/workspace and observer public pin. No retrospective attachment to old runs.",
+    "After startup registration and an ordinary owner handoff request, retain the exact current authenticated native query as tcwh_<id>.authority.json under the protected state directory. Its request has exactly request_id/request_hash/scope/binding_ids/expected_run_ids, plus server acknowledgement_hash in the closed wrapper.",
+    "Public observer admission in Platform must match the same request key, binding/run inventory, program digest, host/workspace and expiry; default-disabled candidate routers/guards require separate reviewed deployment.",
+    "An enrolled performer transports the CLI-generated ACK through the existing native /handoff/ack route. Owner complete creates a new backlog work item; the successor obtains its own current contract, consents and execution admission."
+  ],
+  "commands_not_executed": {
+    "start": "<root-owned-python> -I -B /opt/trustchain-cowork-handoff-qa/qa_handoff_cli.py start --run-id <actual-native-apr> --admission-sha256 <complete-root-admission-hash>",
+    "stop": "<root-owned-python> -I -B /opt/trustchain-cowork-handoff-qa/qa_handoff_cli.py stop --request-id <current-tcwh-id> --request-sha256 <exact-query-request-hash> --acknowledgement-sha256 <canonical-hash-of-query-acknowledgement-hash>",
+    "status": "<root-owned-python> -I -B /opt/trustchain-cowork-handoff-qa/qa_handoff_cli.py status",
+    "admission": "<root-owned-python> -I -B /opt/trustchain-cowork-handoff-qa/qa_handoff_cli.py admission"
+  },
+  "compatibility": {
+    "control_api": [
+      "spawn(scope,run_id,start)",
+      "popen(argv,**kwargs)",
+      "fence_and_drain(scope,request_id,request_hash,timeout=...)",
+      "assert_closed_and_quiescent(request,proof)"
+    ],
+    "observer": "subclass of the actual apatch_studio.work_handoff_stop.StopObserver, adding early exact admission validation; original ACK construction/persistence/retry logic unchanged",
+    "candidate_transport": "existing WorkHandoffDelivery/native query+ack; no parallel server protocol"
+  },
+  "limits": [
+    "Local engine/kernel tests do not prove real Linux/gVisor containment. A fresh real positive and negative server exercise is still required.",
+    "No historical macOS execution, accepted v6 artifact, or general uncontained Studio command is covered.",
+    "Unexpected registration interruption, host reboot, cgroup replacement, escaped tracked PID, container restart or state drift fails closed; this adapter has no reset/unfence/reconcile command.",
+    "Root provisions the request from current authenticated native authority. This offline CLI does not fetch or invent server requests; only the existing server decides ACK admission and handoff completion."
+  ],
+  "native_lifecycle": "qa_native_cli.py / qa_native_lifecycle.py; public normal runner schemas unchanged; README contains exact invocation and root steps"
+}
