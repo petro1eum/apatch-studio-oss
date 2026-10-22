@@ -280,7 +280,8 @@ def test_restarted_controller_can_only_recover_existing_exact_observer(native):
 
 
 def test_headless_session_sets_the_existing_local_implementation_actor(tmp_path):
-    runs,exact,observer=q.create_session(tmp_path,trust=object(),state_root=tmp_path/'state')
+    workspace=tmp_path/'workspace';workspace.mkdir()
+    runs,exact,observer=q.create_session(workspace,trust=object(),state_root=tmp_path/'state')
     try:
         assert exact.actor_id=='studio:implementation'
         assert exact.run_manager is runs and observer.control is runs._handoff_process_control
