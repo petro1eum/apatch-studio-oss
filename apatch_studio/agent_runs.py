@@ -884,6 +884,7 @@ class AgentRunManager:
         state_root: str | os.PathLike[str] | None = None,
         history_limit: int = 200,
         store: RunStore | None = None,
+        handoff_process_control=None,
     ):
         root = Path(workspace).expanduser().resolve()
         if not root.is_dir():
@@ -908,6 +909,7 @@ class AgentRunManager:
             lambda run_id: cleanup_planning_session(root, run_id)
         )
         self._popen = popen
+        self._handoff_process_control = handoff_process_control
         self._external_dispatch_guard = None
         self._review_collector = review_collector or WorkspaceReviewCollector(root).capture
         self._plan_handoff_collector = plan_handoff_collector or PlanHandoffCollector(root)
@@ -1315,20 +1317,28 @@ class AgentRunManager:
             process_env.pop("APATCH_EXECUTION_SOURCE_ARTIFACTS", None)
             if record.request.mode == "new_change":
                 process_env["APATCH_LANE"] = planning_lane_for_run(record.run_id)
-            process = self._popen(
-                argv,
-                cwd=str(self._workspace),
-                env=process_env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                shell=False,
-                start_new_session=True,
-            )
+            def spawn_process():
+                return self._popen(
+                    argv,
+                    cwd=str(self._workspace),
+                    env=process_env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    shell=False,
+                    start_new_session=True,
+                )
+            if self._handoff_process_control is not None and record.execution_context is not None:
+                context = record.execution_context
+                process = self._handoff_process_control.spawn(
+                    {name: getattr(context, name) for name in ('tenant_id','project_group_id','work_item_id')},
+                    record.run_id, spawn_process)
+            else:
+                process = spawn_process()
             with self._lock:
                 record.process = process
                 if record.cancel_requested:

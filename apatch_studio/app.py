@@ -179,6 +179,7 @@ def create_app(
     exact_contract_trust: ExactContractTrust | None = None,
     exact_contract_manager: ExactContractManager | None = None,
     exact_contract_state_root: str | Path | None = None,
+    work_handoff_observer=None,
 ) -> FastAPI:
     frontend = Path(frontend_root) if frontend_root else _frontend_root()
     active_edition = StudioEdition.parse(edition)
@@ -755,6 +756,17 @@ def create_app(
         return evidence_gateway().publish_evidence(
             plan=request.plan, confirmation=request.confirmation,
         )
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/stop-for-reassignment")
+    async def stop_for_reassignment(handoff_id: str, request: Request) -> dict[str, Any]:
+        from apatch_studio.work_handoff_stop import StopUnavailable
+        from apatch_studio.work_handoff_delivery import WorkHandoffDelivery
+        if runtime_exact is None or work_handoff_observer is None:
+            raise ExecutionIntentError("Independent stop observation is not configured", code="handoff_stop_unconfigured", status_code=503)
+        try:
+            return WorkHandoffDelivery(runtime_exact,work_handoff_observer).stop(handoff_id,await request.json())
+        except StopUnavailable as exc:
+            raise ExecutionIntentError("Stop is not yet independently confirmed", code="handoff_stop_unconfirmed", status_code=409) from exc
 
     @app.post("/api/v1/exact-contract-handoffs/import")
     async def import_exact_contract(request: Request) -> dict[str, Any]:

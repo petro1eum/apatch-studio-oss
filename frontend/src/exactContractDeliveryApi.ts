@@ -184,3 +184,12 @@ export async function publishExactEvidence(plan: SharePlan, signal?: AbortSignal
     || !["acknowledged", "queued", "not_checked_this_request"].includes(synchronization.status)) invalid();
   return { synchronization: { status: synchronization.status, delivered: count(synchronization.delivered), pending: count(synchronization.pending) }, customer_decision: "not_requested" };
 }
+
+/** A performer cannot supply stop facts; the independent native observer computes them. */
+export async function stopExactWorkForReassignment(handoffId:string,workspaceId:string,signal?:AbortSignal):Promise<"stop_requested"|"stopped"|"completed"> {
+  const value=await call(endpoint(handoffId)+"/stop-for-reassignment",{workspace_id:text(workspaceId,/^[0-9a-f]{32}$/)},signal);
+  if(value.schema!=="trustchain.cowork.work-handoff.v1" || !["stop_requested","stopped","completed"].includes(value.state)
+    || !value.request || !/^tcwh_[0-9a-f]{32}$/.test(value.request.request_id)
+    || !Array.isArray(value.acknowledged_observers) || value.acknowledged_observers.length===0) invalid();
+  return value.state;
+}

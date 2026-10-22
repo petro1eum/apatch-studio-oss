@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { WorkHandoffStopControl } from "./WorkHandoffStopControl";
 import type { RunnerInfo, WorkspaceOverview } from "./types";
 import { exactLocalVerificationState } from "./productLanguage";
 import {
@@ -193,6 +194,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         <button className="oi-button oi-button-secondary" type="button" key={item.handoff_id} data-testid={"exact-contract-open-" + item.handoff_id}
           onClick={() => choose(item)}>{t.open} {index + 1}</button>)}</div>}
       {selected ? <article style={{ marginTop: 16 }} data-testid="exact-contract-selected" data-handoff-id={selected.handoff_id}>
+        {selected.status === "consumed" && workspaceId && <WorkHandoffStopControl key={scope + selected.handoff_id} handoffId={selected.handoff_id} workspaceId={workspaceId} />}
         {!choices ? <p role="status">{t.loading}</p> : <>
           <div className="oi-action-row" style={{ flexWrap: "wrap", alignItems: "end" }}>
             <label className="oi-field"><span>{t.check}</span><select data-testid="exact-contract-requirement" value={requirement}
