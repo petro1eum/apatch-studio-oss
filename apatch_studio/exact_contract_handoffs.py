@@ -578,6 +578,16 @@ class ExactContractManager:
                 or built.get('change_id') != current.change_id
                 or built.get('change_hash') != current.change_hash):
             denied('Native evidence belongs to another source or Change', 'exact_source_ack_invalid')
+        # Additive Company source publication is enabled explicitly in the
+        # release composition. Existing disconnected/local deliveries keep
+        # their original behavior and never gain Company authority implicitly.
+        import os
+        if os.getenv('TC_COWORK_EXECUTION_SOURCE_PUBLICATION_ENABLED', '').lower() in {'1', 'true'}:
+            from apatch_studio.execution_source_declarations import publish_execution_source, ExecutionSourceError
+            try:
+                publish_execution_source(self, current)
+            except (ExecutionSourceError, OSError, ValueError):
+                denied('The Company execution source has not been published', 'execution_source_unpublished')
         return {'schema':'apatch.studio.exact-contract-evidence-ready.v1','handoff_id':handoff_id,'run_id':run_id,
             'source_binding_id':current.source_binding_id,'source_binding_hash':current.source_binding_hash,
             'change_id':current.change_id,'change_hash':current.change_hash,

@@ -87,3 +87,16 @@ Packaging now rebuilds the Python package from source even if a cached build cop
 
 
 The additive execution source declaration producer in `apatch_studio/execution_source_declarations.py` verifies the workspace's existing signer, native execution receipt, independently signed source receipt and exact shared Change before emitting a separate signed statement. It derives the real 16-hex execution project through the native SDK and keeps it distinct from the ProjectGroup. The canonical portable wire is pinned from avatar-contract5e8a43d under `_contracts/UPSTREAM.json`, preserving the installed Avatar runtime. Nineteen source/crypto/path-boundary tests pass. A real local native run was used to verify its declaration separately; this helper alone is not a Company admission, Tracker receipt, production installation or a browser flow.
+
+### Company execution source publication
+
+A composition that enables `TC_COWORK_EXECUTION_SOURCE_PUBLICATION_ENABLED=true`
+publishes the exact execution source while preparing signed evidence. The
+workspace's existing enrolled key signs the declaration and native HTTP request;
+no key is generated or exported. Studio validates both native receipts, retains
+one declaration outside the Git workspace before network I/O, and requires the
+exact Platform publication acknowledgement. Retry reuses the signed bytes.
+The Company server can then resolve source references itself without asking a
+person to copy JSON. Publication grants no role, Company contract, acceptance or
+payment. Existing local/disconnected deliveries retain their original behavior
+unless the release composition explicitly enables this integration.

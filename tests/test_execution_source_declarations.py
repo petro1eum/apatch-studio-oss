@@ -73,3 +73,58 @@ def test_invalid_execution_selector_never_reads_any_native_file(native, monkeypa
     with pytest.raises(ExecutionSourceError):
         execution_source_declaration(native.root, source_binding_id=native.source['binding_id'],
             execution_binding_id=bad, key_provider=native.provider)
+
+
+def publication_manager(native,tmp_path,handler):
+    import httpx
+    from apatch_studio.intent_store import IntentStore
+    return SimpleNamespace(workspace=native.root,
+        gateway=SimpleNamespace(_workspace_key_provider=lambda:native.provider),
+        store=IntentStore(native.root,state_root=tmp_path.parent/(tmp_path.name+'-studio-state')),
+        http_client_factory=lambda:httpx.Client(transport=httpx.MockTransport(handler))),\
+      SimpleNamespace(canonical_binding_id=native.execution['binding_id'],source_binding_id=native.source['binding_id'])
+
+
+def test_publication_uses_real_enrolled_signature_and_reuses_retained_bytes(native,tmp_path):
+    import json, httpx
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from apatch_studio.execution_source_declarations import publish_execution_source
+    seen=[]
+    def handler(request):
+        body=json.loads(request.content);doc=body['declaration'];seen.append(request.content)
+        assert request.url.path=='/api/internal/project-groups/'+native.source['project_group_id']+'/governed-work/execution-source-declarations'
+        h=request.headers
+        envelope=dict(schema='trustchain.project-group.service-request.v1',method='POST',path=request.url.path,
+          body_sha256='sha256:'+hashlib.sha256(request.content).hexdigest(),tenant_id=body['tenant_id'],subject=body['subject'],
+          issued_at=int(h['X-TC-Service-Issued-At']),expires_at=int(h['X-TC-Service-Expires-At']),nonce=h['X-TC-Service-Nonce'])
+        sig=base64.urlsafe_b64decode(h['X-TC-Service-Signature']+'==')
+        Ed25519PublicKey.from_public_bytes(native.provider.get_public_key()).verify(sig,
+          b'TrustChain-ProjectGroup-Service-Request\0v1\0'+G.canonical_bytes(envelope))
+        return httpx.Response(201,json=dict(schema='trustchain.cowork.execution-source-publication.v1',declaration=doc,
+          envelope_hash='sha256:'+hashlib.sha256(G.canonical_bytes(doc)).hexdigest(),published=True,customer_accepted=False))
+    manager,ctx=publication_manager(native,tmp_path,handler)
+    first=publish_execution_source(manager,ctx);second=publish_execution_source(manager,ctx)
+    assert first==second and seen[0]==seen[1]
+    assert first['declaration']['apatch_project_id']==hashlib.sha256(str(native.root.resolve()).encode()).hexdigest()[:16]
+
+
+@pytest.mark.parametrize('fault',['http','network','changed','accepted','not_published','hash'])
+def test_publication_requires_exact_native_receipt_and_retains_document_on_failure(native,tmp_path,fault):
+    import json,httpx
+    from apatch_studio.execution_source_declarations import publish_execution_source
+    def handler(request):
+        doc=json.loads(request.content)['declaration']
+        reply=dict(schema='trustchain.cowork.execution-source-publication.v1',declaration=doc,
+          envelope_hash='sha256:'+hashlib.sha256(G.canonical_bytes(doc)).hexdigest(),published=True,customer_accepted=False)
+        if fault=='network':raise httpx.ConnectError('TEST ONLY transport unavailable')
+        if fault=='changed':reply['declaration']={**doc,'apatch_project_id':'f'*16}
+        if fault=='accepted':reply['customer_accepted']=True
+        if fault=='not_published':reply['published']=False
+        if fault=='hash':reply['envelope_hash']='sha256:'+'f'*64
+        return httpx.Response(503 if fault=='http' else 201,json=reply)
+    manager,ctx=publication_manager(native,tmp_path,handler)
+    with pytest.raises(ExecutionSourceError):publish_execution_source(manager,ctx)
+    from apatch_studio.state_io import StateDirectory
+    with StateDirectory(manager.store.directory) as directory:
+        stored=directory.read_json('execution-source-'+ctx.canonical_binding_id+'.json',limit=16384)
+    assert stored['executor_key_id']==D.load_config(str(native.root))['service_request_key_id']

@@ -66,3 +66,57 @@ def execution_source_declaration(workspace, *, source_binding_id,
     key = Ed25519PublicKey.from_public_bytes(public)
     return verify_execution_source_declaration(document, trusted_public_key=public,
         verify=lambda message, signature: key.verify(signature, message))
+
+
+def publish_execution_source(manager, context):
+    """Retain signed bytes before I/O, then publish by the native client transport.
+
+    This is called only for the actual guarded full-delivery context. It never
+    syncs unrelated workspaces or mints a key. Retry reuses the same declaration.
+    """
+    from apatch import governed_work_transport as T
+    from apatch_studio.state_io import StateDirectory
+    import json
+    provider = manager.gateway._workspace_key_provider()
+    root = str(manager.workspace)
+    config = D.load_config(root)
+    filename = 'execution-source-' + context.canonical_binding_id + '.json'
+    with manager.store._transaction():
+        with StateDirectory(manager.store.directory, create=True) as directory:
+            try:
+                retained = directory.read_json(filename, limit=16384)
+            except FileNotFoundError:
+                retained = None
+            issued_at = retained.get('issued_at') if isinstance(retained, dict) else None
+            declaration = execution_source_declaration(root, source_binding_id=context.source_binding_id,
+                execution_binding_id=context.canonical_binding_id, key_provider=provider, issued_at=issued_at)
+            if retained is not None and retained != declaration:
+                raise ExecutionSourceError('Retained execution source changed')
+            if retained is None:
+                directory.write_json(filename, declaration)
+    path = '/api/internal/project-groups/' + declaration['project_group_id'] + '/governed-work/execution-source-declarations'
+    raw = json.dumps({'subject':config['client_id'], 'tenant_id':declaration['tenant_id'], 'declaration':declaration},
+        sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
+    headers = {'Content-Type':'application/json', 'X-Apatch-Client-Id':config['client_id'],
+        **T.signed_service_headers(root,method='POST',path=path,raw_body=raw,
+            tenant_id=declaration['tenant_id'],subject=config['client_id'],
+            expected_key_id=config['service_request_key_id'],key_provider=provider)}
+    import httpx
+    try:
+        with manager.http_client_factory() as client:
+            response = client.post(config['platform_url'] + path,content=raw,headers=headers)
+    except httpx.HTTPError as exc:
+        raise ExecutionSourceError('Execution source transport is unavailable') from exc
+    if response.status_code not in (200,201):
+        raise ExecutionSourceError('Platform has not acknowledged this execution source')
+    try:
+        reply = response.json()
+        envelope_hash = 'sha256:' + hashlib.sha256(json.dumps(declaration,sort_keys=True,separators=(',',':'),
+            ensure_ascii=False,allow_nan=False).encode()).hexdigest()
+        if (reply['schema'] != 'trustchain.cowork.execution-source-publication.v1'
+                or reply['declaration'] != declaration or reply['envelope_hash'] != envelope_hash
+                or reply['published'] is not True or reply['customer_accepted'] is not False):
+            raise ValueError()
+    except (ValueError,TypeError,KeyError) as exc:
+        raise ExecutionSourceError('Platform execution source acknowledgement is inconsistent') from exc
+    return reply
