@@ -6,7 +6,7 @@ import {
   ExactDeliveryApiError, buildExactEvidence, importExactContract, listExactContracts,
   previewExactEvidence, publishExactEvidence, readExactChoices, readExactDelivery,
   readExactRun, runExactForDelivery,
-  previewExactArtifacts, publishExactArtifacts,
+  previewExactArtifacts, publishExactArtifacts, exportCompanyEvidence,
 } from "./exactContractDeliveryApi";
 import type { ArtifactPreview, EvidenceReady, ExactContractChoices, ExactContractDelivery, ExactContractRow, PublicationResult, SharePlan } from "./exactContractDeliveryApi";
 
@@ -30,6 +30,8 @@ const words = {
     artifactDone: "Exact files delivered. On the site, receive them into your sandbox and run the stage checks. This is not acceptance.",
     expired: "This short handoff expired before execution. Return to the site and resend the same agreed contract; new consents are not required if the terms are unchanged.",
     outputChanged: "The files do not match the signed output of this run. Check its result or complete a new authorized attempt; the old run is not reused as proof for changed files.",
+    trackerExport: "Download signed evidence for Tracker",
+    trackerUnavailable: "Company confirmation and a new execution after that confirmation are required for this export.",
     previewChanged: "The files changed after preview. Review the exact file selection again before sending.",
   },
   ru: { title: "Договоры с заказчиком", note: "Тесты закреплены подписанным договором. Studio не может менять их или принимать работу за заказчика.",
@@ -51,6 +53,8 @@ const words = {
     artifactDone: "Точные файлы доставлены. На сайте получите их в свою песочницу и выполните проверки этапов. Это не приёмка.",
     expired: "Короткая передача истекла до начала исполнения. Вернитесь на сайт и повторно передайте тот же договор; если условия не менялись, новые согласия не нужны.",
     outputChanged: "Файлы не совпадают с подписанным результатом этого запуска. Проверьте результат или выполните новую разрешённую попытку; старый запуск не подтверждает изменённые файлы.",
+    trackerExport: "Скачать подписанные доказательства для Tracker",
+    trackerUnavailable: "Для этой передачи нужны подтверждение Company и новый запуск после подтверждения.",
     previewChanged: "После предпросмотра файлы изменились. Снова проверьте точный состав перед отправкой.",
   },
 };
@@ -110,7 +114,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         const changed = ["publication_context_changed", "workspace_identity_mismatch", "publication_preview_required"].includes(code);
         if (changed) { setPlan(null); setConsent(false); setPublication(null); }
         if (code === 'artifact_package_changed') { setArtifactPlan(null); setArtifactConsent(false); setArtifactDone(false); }
-        setError(code === 'exact_contract_expired' ? t.expired : code === 'artifact_package_changed' ? t.previewChanged
+        setError(code === 'company_source_evidence_unavailable' ? t.trackerUnavailable : code === 'exact_contract_expired' ? t.expired : code === 'artifact_package_changed' ? t.previewChanged
           : ['artifact_output_changed', 'artifact_output_unconfirmed'].includes(code) ? t.outputChanged : changed ? t.changed : t.error);
       }
     } finally {
@@ -226,6 +230,14 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
           </div> : null}
           {publication ? <p role="status" data-testid="exact-evidence-delivery-status">{publication.synchronization.status === "acknowledged" ? t.received
             : publication.synchronization.status === "queued" ? t.queued : t.cached}</p> : null}
+          {runStatus === 'succeeded' && evidence && <button type="button" className="oi-button oi-button-secondary"
+            disabled={busy!==null} data-testid="company-evidence-export" onClick={()=>void act('company-export',async(signal,stamp)=>{
+              const bundle=await exportCompanyEvidence(selected.handoff_id,evidence.run_id,signal);
+              if(!current(stamp))return;
+              const url=URL.createObjectURL(new Blob([JSON.stringify(bundle,null,2)+'\n'],{type:'application/json'}));
+              const link=document.createElement('a');link.href=url;link.download='CapabilityEvidence-'+bundle.bundle_id+'.json';
+              link.click();URL.revokeObjectURL(url);
+            })}>{t.trackerExport}</button>}
           {runStatus === 'succeeded' && evidence && <button type="button" className="oi-button oi-button-secondary"
             disabled={busy !== null} data-testid="exact-artifacts-preview" onClick={() => void act('artifacts-preview', async (signal, stamp) => {
               const value = await previewExactArtifacts(selected.handoff_id, evidence.run_id, signal);

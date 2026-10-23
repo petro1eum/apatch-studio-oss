@@ -823,6 +823,23 @@ def create_app(
             raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
         return runtime_exact.build_for_delivery(handoff_id, request.run_id)
 
+    @app.post('/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence')
+    def company_capability_evidence(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError('Exact delivery is not configured',code='exact_contract_unconfigured',status_code=503)
+        from apatch_studio.cowork_capability_evidence import build_company_capability_evidence
+        from apatch.trust_identity import workspace_identity_scope
+        from apatch_studio.projection import assert_projection_safe
+        try:
+            with workspace_identity_scope(str(runtime_exact.workspace)):
+                bundle=build_company_capability_evidence(runtime_exact,handoff_id=handoff_id,run_id=request.run_id)
+            assert_projection_safe(bundle)
+        except Exception as exc:
+            raise ExecutionIntentError('The current Company source evidence is not ready',
+                code='company_source_evidence_unavailable',status_code=409) from exc
+        return {'schema':'apatch.studio.company-capability-evidence.v1','handoff_id':handoff_id,
+            'run_id':request.run_id,'evidence_bundle':bundle,'customer_accepted':False,'tracker_delivered':False}
+
     @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/preview-artifacts")
     def preview_exact_artifacts(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
         if runtime_exact is None:

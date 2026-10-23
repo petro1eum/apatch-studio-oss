@@ -193,3 +193,16 @@ export async function stopExactWorkForReassignment(handoffId:string,workspaceId:
     || !Array.isArray(value.acknowledged_observers) || value.acknowledged_observers.length===0) invalid();
   return value.state;
 }
+
+
+export async function exportCompanyEvidence(handoffId: string, runId: string, signal?: AbortSignal) {
+  const value=await call(endpoint(handoffId)+'/company-capability-evidence',
+    {confirmed:true,run_id:text(runId,RUN)},signal);
+  if(value.schema!=='apatch.studio.company-capability-evidence.v1' || value.handoff_id!==handoffId
+      || value.run_id!==runId || value.customer_accepted!==false || value.tracker_delivered!==false) invalid();
+  const bundle=object(value.evidence_bundle);
+  if(bundle.kind!=='capability_evidence' || bundle.schema_version!==2 || bundle.source!=='apatch'
+      || !Array.isArray(bundle.episodes) || bundle.episodes.length<1 || !bundle.signature) invalid();
+  text(bundle.bundle_id,/^[0-9a-f]{40}$/);
+  return bundle;
+}
