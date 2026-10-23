@@ -14,7 +14,7 @@ export interface ExactContractDelivery {
   handoff_id: string;
   run_id: string | null;
   requirement: string | null;
-  status: "not_selected" | "pending_source_ack" | "source_acknowledged";
+  status: "not_selected" | "pending_source_ack" | "source_acknowledged" | "awaiting_company";
   source_binding_id: string | null;
   source_binding_hash: string | null;
 }
@@ -133,7 +133,7 @@ export async function readExactChoices(handoffId: string, signal?: AbortSignal):
 function delivery(value: Raw, handoffId: string): ExactContractDelivery {
   if (value.schema !== "apatch.studio.exact-contract-delivery-view.v1" || value.handoff_id !== handoffId
     || value.customer_accepted !== false || value.ready_for_publication !== false
-    || !["not_selected", "pending_source_ack", "source_acknowledged"].includes(value.status)) invalid();
+    || !["not_selected", "pending_source_ack", "source_acknowledged", "awaiting_company"].includes(value.status)) invalid();
   return { handoff_id: handoffId, run_id: value.run_id === null ? null : text(value.run_id, RUN),
     requirement: value.requirement === null ? null : text(value.requirement, REQUIREMENT), status: value.status,
     source_binding_id: value.source_binding_id === null ? null : text(value.source_binding_id, SOURCE),

@@ -21,6 +21,7 @@ const words = {
     cached: "Previously recorded delivery; a new receipt was not checked. The customer still decides.",
     local: "Evidence is ready locally. Nothing has been published.", notRun: "Execution has not started.", running: "Local execution is not yet verified.",
     verified: "Local tests passed. This is evidence, not customer acceptance.", finished: "The agent finished. Prepare signed evidence to confirm the agreed tests.", ack: "Source acknowledgement received.",
+    companyWaiting: "Waiting for Company confirmation. Execution has not started.", companyContinue: "Check Company confirmation and continue",
     sourceWaiting: "Source acknowledgement is still pending; execution/evidence is not ready.", recipient: "Recipient", selection: "Selection",
     bundle: "Evidence record", time: "Time record", proof: "Agreement and proof references", requirement: "Agreed requirement",
     error: "This operation could not be completed. Refresh the selected contract before retrying.", changed: "The workspace, account or selection changed. Open the current contract and preview again.",
@@ -41,6 +42,7 @@ const words = {
     cached: "Доставка ранее отмечена; новая квитанция не проверялась. Решение остаётся за заказчиком.",
     local: "Доказательства готовы локально. Ничего не опубликовано.", notRun: "Выполнение ещё не началось.", running: "Локальное выполнение ещё не проверено.",
     verified: "Локальные тесты прошли. Это доказательства, а не приёмка заказчиком.", finished: "Агент завершил работу. Подготовьте подписанные доказательства, чтобы подтвердить согласованные тесты.", ack: "Привязка к источнику подтверждена.",
+    companyWaiting: "Ждём подтверждения Company. Выполнение ещё не началось.", companyContinue: "Проверить подтверждение Company и продолжить",
     sourceWaiting: "Подтверждение источника ещё ожидается; выполнение и доказательства не готовы.", recipient: "Получатель", selection: "Состав",
     bundle: "Запись доказательств", time: "Запись времени", proof: "Ссылки на договор и доказательства", requirement: "Согласованное требование",
     error: "Операцию не удалось завершить. Обновите выбранный договор перед повтором.", changed: "Рабочая область, аккаунт или выбор изменились. Откройте текущий договор и проверьте состав заново.",
@@ -198,15 +200,15 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         {!choices ? <p role="status">{t.loading}</p> : <>
           <div className="oi-action-row" style={{ flexWrap: "wrap", alignItems: "end" }}>
             <label className="oi-field"><span>{t.check}</span><select data-testid="exact-contract-requirement" value={requirement}
-              disabled={busy !== null || delivery?.status === "source_acknowledged"} onChange={event => { setRequirement(event.target.value); setPlan(null); setConsent(false); setEvidence(null); setPublication(null); }}>
+              disabled={busy !== null || (delivery?.status === "source_acknowledged" || delivery?.status === "awaiting_company")} onChange={event => { setRequirement(event.target.value); setPlan(null); setConsent(false); setEvidence(null); setPublication(null); }}>
               {choices.requirements.map((item, index) => <option key={item.requirement} value={item.requirement}>{t.check} {index + 1}</option>)}
             </select></label>
-            <label className="oi-field"><span>{t.runner}</span><select data-testid="exact-contract-runner" value={runner} disabled={busy !== null || delivery?.status === "source_acknowledged"}
+            <label className="oi-field"><span>{t.runner}</span><select data-testid="exact-contract-runner" value={runner} disabled={busy !== null || (delivery?.status === "source_acknowledged" || delivery?.status === "awaiting_company")}
               onChange={event => setRunner(event.target.value as "codex" | "claude")}>{availableRunners.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
             <button className="oi-button oi-button-primary" type="button" data-testid="exact-contract-run" onClick={run}
-              disabled={busy !== null || !requirement || !availableRunners.some(item => item.id === runner) || Boolean(delivery?.run_id)}>{t.run}</button>
+              disabled={busy !== null || !requirement || !availableRunners.some(item => item.id === runner) || Boolean(delivery?.run_id)}>{delivery?.status === "awaiting_company" ? t.companyContinue : t.run}</button>
           </div>
-          <p role="status">{delivery?.status === "pending_source_ack" ? t.sourceWaiting : t[exactLocalVerificationState(runStatus, delivery?.run_id ?? null, evidence)]}</p>
+          <p role="status">{delivery?.status === "awaiting_company" ? t.companyWaiting : delivery?.status === "pending_source_ack" ? t.sourceWaiting : t[exactLocalVerificationState(runStatus, delivery?.run_id ?? null, evidence)]}</p>
           <div className="oi-action-row" style={{ flexWrap: "wrap" }}>
             <button className="oi-button oi-button-secondary" type="button" disabled={busy !== null} onClick={refresh}>{t.refresh}</button>
             <button className="oi-button oi-button-secondary" type="button" data-testid="exact-contract-build" onClick={build}

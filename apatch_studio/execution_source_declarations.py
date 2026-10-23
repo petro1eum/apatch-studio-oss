@@ -120,3 +120,34 @@ def publish_execution_source(manager, context):
     except (ValueError,TypeError,KeyError) as exc:
         raise ExecutionSourceError('Platform execution source acknowledgement is inconsistent') from exc
     return reply
+
+
+def check_company_execution_admission(manager, context):
+    """Publish before execution, then query the server's current admission fence."""
+    from apatch import governed_work_transport as T
+    import json,httpx
+    publication=publish_execution_source(manager,context)
+    declaration=publication['declaration'];root=str(manager.workspace);config=D.load_config(root)
+    provider=manager.gateway._workspace_key_provider()
+    path='/api/internal/project-groups/'+declaration['project_group_id']+'/governed-work/company-execution-admission'
+    raw=json.dumps({'subject':config['client_id'],'tenant_id':declaration['tenant_id'],'declaration':declaration},
+        sort_keys=True,separators=(',',':'),ensure_ascii=False,allow_nan=False).encode()
+    headers={'Content-Type':'application/json','X-Apatch-Client-Id':config['client_id'],
+        **T.signed_service_headers(root,method='POST',path=path,raw_body=raw,tenant_id=declaration['tenant_id'],
+            subject=config['client_id'],expected_key_id=config['service_request_key_id'],key_provider=provider)}
+    try:
+        with manager.http_client_factory() as client:
+            response=client.post(config['platform_url']+path,content=raw,headers=headers)
+        if response.status_code!=200:raise ValueError()
+        result=response.json()
+        if (result['schema']!='trustchain.cowork.company-execution-admission.v1'
+                or type(result['required']) is not bool or type(result['admitted']) is not bool
+                or type(result['execution_permitted']) is not bool
+                or result['execution_permitted']!=(not result['required'] or result['admitted'])):raise ValueError()
+        if result['required'] and result['admitted']:
+            if result['execution_source_hash']!=publication['envelope_hash']:raise ValueError()
+            from uuid import UUID
+            if str(UUID(result['contract_id']))!=result['contract_id']:raise ValueError()
+        return result
+    except (httpx.HTTPError,ValueError,TypeError,KeyError) as exc:
+        raise ExecutionSourceError('Current Company execution admission is unavailable') from exc

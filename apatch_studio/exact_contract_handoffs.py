@@ -33,7 +33,7 @@ from apatch_studio.intent_store import IntentStore
 from apatch_studio.operations import AgentRunRequest, ExecutionContext, SddExecutionContext
 from apatch_studio.sdd_workflow import SddWorkflowFacade
 from apatch_studio.state_io import StateDirectory, read_json
-from apatch_studio.exact_contract_delivery import ExactContractDelivery
+from apatch_studio.exact_contract_delivery import ExactContractDelivery, SourceBoundExecutionContext
 
 ISSUE_PURPOSE = 'apatch_studio.exact_contract_handoff.issue'
 BIND_PURPOSE = 'apatch_studio.exact_contract.bind'
@@ -308,7 +308,7 @@ class ExactContractManager:
         bundle = read_json(path, limit=MAX_DOCUMENT)
         if raw_hash(bundle) != row['bundle_hash']:
             denied('Private exact handoff changed', 'exact_journal_tampered')
-        if historical and (row['status'] != 'consumed' or row['ack'] is None or row['facts'] is None):
+        if historical and (not (row['status']=='consumed' or row.get('company_waiting') is True) or row['ack'] is None or row['facts'] is None):
             denied('Historical proof requires a retained admission', 'exact_ack_required')
         return self.trust.validate_bundle(bundle, now=self.clock(), historical=historical)
 
@@ -501,14 +501,14 @@ class ExactContractManager:
         context = None if selected is None else selected['context']
         return {'schema':'apatch.studio.exact-contract-delivery-view.v1','handoff_id':handoff_id,
             'run_id':None if attempt is None else attempt['run_id'],'requirement':row['requirement'],
-            'status':'not_selected' if selected is None else ('pending_source_ack' if context is None else 'source_acknowledged'),
+            'status':'awaiting_company' if row['status']=='awaiting_company' else ('not_selected' if selected is None else ('pending_source_ack' if context is None else 'source_acknowledged')),
             'source_binding_id':None if context is None else context['source_binding_id'],
             'source_binding_hash':None if context is None else context['source_binding_hash'],
             'ready_for_publication':False,'customer_accepted':False}
 
     def delivery_choices(self, handoff_id):
         row = self._update(lambda rows: copy.deepcopy(self._find(rows, handoff_id)))
-        bundle = self._read_bundle(row, historical=row['status'] == 'consumed')
+        bundle = self._read_bundle(row, historical=row['status']=='consumed' or row.get('company_waiting') is True)
         return {'schema':'apatch.studio.exact-contract-delivery-choices.v1','handoff_id':handoff_id,
             'workspace_id':self.workspace_id,'action':'confirm_for_delivery',
             'requirements':copy.deepcopy(bundle['handoff']['requirements'])}
@@ -599,74 +599,106 @@ class ExactContractManager:
         if confirmation.workspace_id != self.workspace_id:
             denied('A different workspace was selected', 'workspace_identity_mismatch')
         def begin(rows):
-            row = self._find(rows, handoff_id)
-            if row['status'] == 'consumed':
-                if row['requirement'] != confirmation.requirement or self.run_manager.get(row['run_id'])['runner'] != confirmation.runner_id:
-                    denied('Exact confirmation replay changed its choice', 'exact_contract_replay')
+            row=self._find(rows,handoff_id)
+            if row['status']=='consumed':
+                if row['requirement']!=confirmation.requirement or self.run_manager.get(row['run_id'])['runner']!=confirmation.runner_id:
+                    denied('Exact confirmation replay changed its choice','exact_contract_replay')
                 return copy.deepcopy(row)
-            if row['status'] != 'pending':
-                denied('Exact dispatch is already inflight or requires review', 'exact_contract_replay')
-            row['status'], row['requirement'] = 'consuming', confirmation.requirement
+            if row['status']=='awaiting_company':
+                if not for_delivery or row['requirement']!=confirmation.requirement or row.get('company_runner')!=confirmation.runner_id:
+                    denied('Company continuation changed its admitted choice','exact_contract_replay')
+            elif row['status']!='pending':
+                denied('Exact dispatch is already inflight or requires review','exact_contract_replay')
+            row['status'],row['requirement']='consuming',confirmation.requirement
             return copy.deepcopy(row)
-        row = self._update(begin)
-        if row['status'] == 'consumed':
-            return self._project(row)
+        row=self._update(begin)
+        if row['status']=='consumed':return self._project(row)
         try:
-            # No local acceptance or profile read follows an existing native
-            # disconnect fence; the provider is the already enrolled identity.
-            provider = self.gateway._workspace_key_provider()
-            bundle = self._read_bundle(row)
-            sdd = self._preflight(bundle, confirmation.requirement, review_revision=True)
-            if for_delivery and 'apatch_attest' not in sdd.task_envelope['tools']:
-                denied('The agreed envelope does not authorize an attested delivery cycle', 'exact_delivery_contract_required')
-            h, proposal = bundle['handoff'], bundle['legacy_intent']
-            accepted = M.accept_execution_proposal(str(self.workspace), proposal=proposal,
-                confirmation=f"{proposal['work_item_id']}:{proposal['authority_version']}", spec_id=sdd.spec_id,
-                requirement_ids=[sdd.requirement_id], purpose=native_acceptance_purpose(confirmation.requirement, h['handoff_id']),
-                queue_source_binding=False, request_key_provider=provider, now=self.clock())
-            if accepted.get('ok') is not True or accepted.get('work_started') is not False:
-                denied('Native acceptance is unavailable', 'exact_native_acceptance_failed')
-            change, acceptance = accepted['change'], accepted['proposal_acceptance']
-            facts = {'schema':FACTS_SCHEMA, **{name:h[name] for name in ('handoff_id','contract_id','snapshot_hash','tenant_id',
-                'project_group_id','work_item_id','work_program_id','work_program_hash','native_contract_hash')},
-                'handoff_document_hash':G.document_hash(h),'handoff_envelope_hash':G.envelope_hash(h),
-                'requirement':confirmation.requirement,'task_envelope_hash':sdd.envelope_hash,
-                'change_id':change['change_id'],'change_hash':G.document_hash(change),
-                'raw_spec_hash':sdd.contract['spec_hash'],'native_spec_hash':change['spec_hash'],
-                'proposal_acceptance_hash':G.envelope_hash(acceptance),'accepted_at':acceptance['accepted_at']}
-            ack = self._exchange(bundle, facts, change, acceptance)
-            local = self.sdd.execution_binding(sdd.spec_id, sdd.requirement_id, actor_id=self.actor_id)
-            if local['contract_hash'] != sdd.contract_hash:
-                from apatch_studio.exact_scheme_revision import install_revision
-                install_revision(self, bundle, confirmation.requirement, association=ack['association'])
-                self._preflight(bundle, confirmation.requirement)
-            def record_ack(rows):
-                current = self._find(rows,handoff_id)
-                if current['status'] != 'consuming' or current['requirement'] != confirmation.requirement:
-                    denied('Exact dispatch state changed', 'exact_journal_conflict')
-                if current['ack'] is not None and raw_canonical(current['ack']) != raw_canonical(ack):
-                    denied('Exact association equivocation', 'exact_ack_invalid')
-                current['ack'], current['facts'] = ack, facts
-            self._update(record_ack)
-            if for_delivery:
-                row['ack'],row['facts'] = ack,facts
-                self.delivery.prepare(row,change,ack)
+            if row.get('company_waiting') is True:
+                # Continue the already bound operation. The short handoff is
+                # historical; current bilateral authority is checked at start
+                # and immediately before Popen by guard_execution.
+                bundle=self._read_bundle(row,historical=True)
+                sdd=self._preflight(bundle,confirmation.requirement)
+                proposal=bundle['legacy_intent']
+                change=G.load_change(str(self.workspace),row['facts']['change_id'])
+            else:
+                # No local acceptance or profile read follows an existing native
+                # disconnect fence; the provider is the already enrolled identity.
+                provider = self.gateway._workspace_key_provider()
+                bundle = self._read_bundle(row)
+                sdd = self._preflight(bundle, confirmation.requirement, review_revision=True)
+                if for_delivery and 'apatch_attest' not in sdd.task_envelope['tools']:
+                    denied('The agreed envelope does not authorize an attested delivery cycle', 'exact_delivery_contract_required')
+                h, proposal = bundle['handoff'], bundle['legacy_intent']
+                accepted = M.accept_execution_proposal(str(self.workspace), proposal=proposal,
+                    confirmation=f"{proposal['work_item_id']}:{proposal['authority_version']}", spec_id=sdd.spec_id,
+                    requirement_ids=[sdd.requirement_id], purpose=native_acceptance_purpose(confirmation.requirement, h['handoff_id']),
+                    queue_source_binding=False, request_key_provider=provider, now=self.clock())
+                if accepted.get('ok') is not True or accepted.get('work_started') is not False:
+                    denied('Native acceptance is unavailable', 'exact_native_acceptance_failed')
+                change, acceptance = accepted['change'], accepted['proposal_acceptance']
+                facts = {'schema':FACTS_SCHEMA, **{name:h[name] for name in ('handoff_id','contract_id','snapshot_hash','tenant_id',
+                    'project_group_id','work_item_id','work_program_id','work_program_hash','native_contract_hash')},
+                    'handoff_document_hash':G.document_hash(h),'handoff_envelope_hash':G.envelope_hash(h),
+                    'requirement':confirmation.requirement,'task_envelope_hash':sdd.envelope_hash,
+                    'change_id':change['change_id'],'change_hash':G.document_hash(change),
+                    'raw_spec_hash':sdd.contract['spec_hash'],'native_spec_hash':change['spec_hash'],
+                    'proposal_acceptance_hash':G.envelope_hash(acceptance),'accepted_at':acceptance['accepted_at']}
+                ack = self._exchange(bundle, facts, change, acceptance)
+                local = self.sdd.execution_binding(sdd.spec_id, sdd.requirement_id, actor_id=self.actor_id)
+                if local['contract_hash'] != sdd.contract_hash:
+                    from apatch_studio.exact_scheme_revision import install_revision
+                    install_revision(self, bundle, confirmation.requirement, association=ack['association'])
+                    self._preflight(bundle, confirmation.requirement)
+                def record_ack(rows):
+                    current = self._find(rows,handoff_id)
+                    if current['status'] != 'consuming' or current['requirement'] != confirmation.requirement:
+                        denied('Exact dispatch state changed', 'exact_journal_conflict')
+                    if current['ack'] is not None and raw_canonical(current['ack']) != raw_canonical(ack):
+                        denied('Exact association equivocation', 'exact_ack_invalid')
+                    current['ack'], current['facts'] = ack, facts
+                self._update(record_ack)
+                if for_delivery:
+                    row['ack'],row['facts'] = ack,facts
+                    self.delivery.prepare(row,change,ack)
+                    if self._company_admission_enabled():
+                        def retain_bound_wait(rows):
+                            current=self._find(rows,handoff_id)
+                            current.update(company_waiting=True,company_runner=confirmation.runner_id)
+                        self._update(retain_bound_wait)
+            if for_delivery and self._company_admission_enabled():
+                selected=self.delivery.selected(handoff_id)
+                context=SourceBoundExecutionContext.model_validate(selected['context'])
+                from apatch_studio.execution_source_declarations import check_company_execution_admission
+                gate=check_company_execution_admission(self,context)
+                if gate['execution_permitted'] is not True:
+                    def wait(rows):
+                        current=self._find(rows,handoff_id)
+                        current.update(status='awaiting_company',company_waiting=True,company_runner=confirmation.runner_id)
+                        return self._project(current)
+                    return self._update(wait)
             context = ExecutionContext(**{name:proposal[name] for name in ('intent_id','tenant_id','project_group_id','work_item_id',
                 'work_item_hash','authority_version','work_program_id','work_program_hash')},
                 document_hash=G.document_hash(proposal),envelope_hash=G.envelope_hash(proposal))
-            run = self.run_manager.start(self.run_request_model(mode='requirement', runner=confirmation.runner_id,
+            run=self.run_manager.start(self.run_request_model(mode='requirement',runner=confirmation.runner_id,
                 objective=proposal['objective'],spec_id=sdd.spec_id,requirement_id=sdd.requirement_id),
                 execution_context=context,sdd_execution=sdd)
-            if not isinstance(run.get('run_id'), str):
-                denied('Native dispatch has no retained run identity', 'exact_dispatch_uncertain')
+            if not isinstance(run.get('run_id'),str):
+                denied('Native dispatch has no retained run identity','exact_dispatch_uncertain')
         except Exception:
-            self._reconcile(handoff_id=handoff_id, restore_if_absent=True)
+            self._reconcile(handoff_id=handoff_id,restore_if_absent=True)
             raise
         def consume(rows):
-            current = self._find(rows,handoff_id)
-            current['status'], current['run_id'] = 'consumed', run['run_id']
+            current=self._find(rows,handoff_id)
+            current['status'],current['run_id']='consumed',run['run_id']
             return self._project(current)
         return self._update(consume)
+
+    @staticmethod
+    def _company_admission_enabled():
+        import os
+        return os.environ.get('TC_COWORK_EXECUTION_SOURCE_PUBLICATION_ENABLED','').lower()=='true'
 
     def guard_execution(self, request, execution_context, sdd_execution, *, stage):
         if execution_context is None:
@@ -691,14 +723,14 @@ class ExactContractManager:
                     or (attempt['status'] == 'succeeded' and attempt.get('can_retry') is True)))
                 or (stage == 'pre_popen' and attempt.get('retry_of') is not None
                     and attempt['status'] in ('queued', 'running'))))
-        historical = stage == 'build_evidence' or continuation
+        historical = stage == 'build_evidence' or continuation or row.get('company_waiting') is True
         if stage == 'build_evidence':
             attempt = self._delivery_attempt(row)
             if attempt is None or attempt['status'] != 'succeeded':
                 denied('Historical evidence requires a successful admitted attempt', 'exact_delivery_run_incomplete')
         bundle = self._read_bundle(row, historical=historical)
         current = self._preflight(bundle,row['requirement'])
-        if continuation:
+        if continuation or row.get('company_waiting') is True:
             # Resume the already admitted operation, not the expired transfer
             # token. The server revalidates its original ACK and active parties
             # below; the SAME durable task budget must still permit execution.
@@ -727,7 +759,16 @@ class ExactContractManager:
         if raw_canonical(after_ack.model_dump()) != raw_canonical(current.model_dump()):
             denied('The native context changed during authority refresh', 'exact_local_contract_mismatch')
         self.trust.validate_bundle(bundle, now=self.clock(), historical=historical)
-        return self.delivery.guard_context(row,change,ack)
+        context=self.delivery.guard_context(row,change,ack)
+        if context is not None and stage in ('start','pre_popen') and self._company_admission_enabled():
+            from apatch_studio.execution_source_declarations import check_company_execution_admission
+            gate=check_company_execution_admission(self,context)
+            if gate['execution_permitted'] is not True:
+                denied('Company confirmation is required before execution','company_admission_required')
+            after_gate=self._preflight(bundle,row['requirement'])
+            if raw_canonical(after_gate.model_dump())!=raw_canonical(current.model_dump()):
+                denied('Native context changed during Company confirmation','exact_local_contract_mismatch')
+        return context
 
     def _reconcile(self, *, handoff_id=None, restore_if_absent=False):
         runs = self.run_manager.list()
@@ -747,7 +788,7 @@ class ExactContractManager:
                 if len(found) == 1:
                     row['status'],row['run_id'] = 'consumed',found[0]['run_id']
                 elif not matching_intents and restore_if_absent:
-                    row['status'] = 'pending'
+                    row['status'] = 'awaiting_company' if row.get('company_waiting') is True else 'pending'
                 else:
                     row['status'] = 'manual_review'
         self._update(reconcile)

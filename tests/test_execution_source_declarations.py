@@ -128,3 +128,32 @@ def test_publication_requires_exact_native_receipt_and_retains_document_on_failu
     with StateDirectory(manager.store.directory) as directory:
         stored=directory.read_json('execution-source-'+ctx.canonical_binding_id+'.json',limit=16384)
     assert stored['executor_key_id']==D.load_config(str(native.root))['service_request_key_id']
+
+
+@pytest.mark.parametrize('fault',[None,'not_ready','http','wrong_hash','permission','shape'])
+def test_current_admission_probe_is_source_exact_and_fail_closed(native,tmp_path,fault):
+    import json,httpx
+    from apatch_studio.execution_source_declarations import check_company_execution_admission
+    calls=[]
+    def handler(request):
+        body=json.loads(request.content);doc=body['declaration'];calls.append(request.url.path)
+        digest='sha256:'+hashlib.sha256(G.canonical_bytes(doc)).hexdigest()
+        if request.url.path.endswith('/execution-source-declarations'):
+            return httpx.Response(201,json=dict(schema='trustchain.cowork.execution-source-publication.v1',declaration=doc,
+                envelope_hash=digest,published=True,customer_accepted=False))
+        assert request.url.path.endswith('/company-execution-admission')
+        assert request.headers['X-TC-Service-Key-Id']==D.load_config(str(native.root))['service_request_key_id']
+        result=dict(schema='trustchain.cowork.company-execution-admission.v1',required=True,admitted=True,
+            execution_permitted=True,contract_id='11111111-1111-4111-8111-111111111111',execution_source_hash=digest)
+        if fault=='not_ready':result.update(admitted=False,execution_permitted=False)
+        if fault=='wrong_hash':result['execution_source_hash']='sha256:'+'f'*64
+        if fault=='permission':result['execution_permitted']=False
+        if fault=='shape':result['required']='true'
+        return httpx.Response(503 if fault=='http' else 200,json=result)
+    manager,context=publication_manager(native,tmp_path,handler)
+    if fault in {'http','wrong_hash','permission','shape'}:
+        with pytest.raises(ExecutionSourceError):check_company_execution_admission(manager,context)
+    else:
+        result=check_company_execution_admission(manager,context)
+        assert result['execution_permitted'] is (fault is None)
+    assert len(calls)==2
