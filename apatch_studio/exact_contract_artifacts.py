@@ -78,7 +78,8 @@ def verify_run_outputs(manager, source_binding_id, built, candidates, files, exp
                     from apatch.traceability import build_traceability_index
                     index = build_traceability_index(rows).get('op_id_index') or {}
                     witnesses = []
-                    source_ref = f"project-source-binding:{source['binding_id']}@{G.document_hash(source)}"
+                    source_ref = {"kind": "project-source-binding", "id": source["binding_id"],
+                        "content_hash": G.document_hash(source)}
                     for sid, attestation in attestations.items():
                         mutation_ids = [identity for identity, summary in index.items()
                             if summary.get('role') == 'mutation' and summary.get('governed_session_id') == sid]
@@ -86,7 +87,7 @@ def verify_run_outputs(manager, source_binding_id, built, candidates, files, exp
                             mutations = [r for r in rows if r['id'] == identity]
                             if (len(mutations) != 1 or not verified(mutations[0])
                                     or _ledger_entry_order(mutations[0]) >= _ledger_entry_order(attestation)
-                                    or source_ref not in mutations[0]['payload'].get('artifacts', [])):
+                                    or source_ref not in index[identity].get('artifacts', [])):
                                 raise ValueError('The native mutation history is unconfirmed')
                         witnesses.append(verified_content(manager, attestation, *expected_profile,
                             expected_mutation_ids=mutation_ids))

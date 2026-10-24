@@ -140,3 +140,27 @@ def test_unchanged_file_with_real_signed_mutation_requires_exact_native_history(
     else:
         with pytest.raises(ExecutionIntentError):
             verify_run_outputs(v.manager,v.source['binding_id'],built,[v.path],{v.path:v.data},(v.contract,v.envelope))
+
+
+@pytest.mark.parametrize('fault',[None,'signature','source','session','invented','after_attestation'])
+def test_native_structured_source_artifacts_use_the_same_strict_history(verified,monkeypatch,fault):
+    from apatch.artifact import payload_artifacts
+    original=TrustChain.sign
+    def native_format(self,*args,**kwargs):
+        if args[0]=='apatch':
+            data=kwargs['data'];kwargs['data']={**data,'artifacts':payload_artifacts(data)}
+        return original(self,*args,**kwargs)
+    monkeypatch.setattr(TrustChain,'sign',native_format)
+    test_unchanged_file_with_real_signed_mutation_requires_exact_native_history(verified,fault)
+
+
+def test_first_contract_delivers_unchanged_files_only_with_a_verified_native_mutation(verified):
+    v=verified
+    v.contract=seal({k:value for k,value in v.contract.items() if k!='supersedes_hash'})
+    v.envelope=seal({**v.envelope,'contract_hash':v.contract['document_hash']})
+    v.snapshot=seal({**v.snapshot,'contract_hash':v.contract['document_hash'],'envelope_hash':v.envelope['document_hash']})
+    proof={**v.proof,'contract_hash':v.contract['document_hash'],'envelope_hash':v.envelope['document_hash'],'task_envelope':v.envelope,
+        'verification':seal({**v.proof['verification'],'content_snapshot_hash':v.snapshot['document_hash']})}
+    v.proof=seal(proof);v.witness.unlink()
+    v.witness=v.witness.parent/(v.snapshot['document_hash'][7:]+'.json');v.witness.write_text(json.dumps(v.snapshot))
+    test_unchanged_file_with_real_signed_mutation_requires_exact_native_history(v,None)

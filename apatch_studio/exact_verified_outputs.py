@@ -11,7 +11,7 @@ from apatch_studio.state_io import StateDirectory
 
 def verified_content(manager, attestation, contract, envelope, *, expected_mutation_ids=()):
     proof = attestation['payload'].get('sdd_evidence')
-    if not contract.get('supersedes_hash') or not isinstance(proof, dict):
+    if (not contract.get('supersedes_hash') and not expected_mutation_ids) or not isinstance(proof, dict):
         raise ValueError('Fresh native revision verification required')
     S._verify_seal(proof, 'native attestation evidence')
     verification = proof.get('verification') or {}
