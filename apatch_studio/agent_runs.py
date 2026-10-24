@@ -441,6 +441,7 @@ def build_governed_prompt(
     planning_contract_run_id: str | None = None,
     planning_context: str | None = None,
     source_artifacts: list[dict[str, Any]] | None = None,
+    reviewer_note: str | None = None,
 ) -> str:
     """Build mode-specific instructions; user content is transported over stdin."""
 
@@ -458,6 +459,11 @@ def build_governed_prompt(
         "Treat the frozen verification contract and task envelope as the only authority for source work.",
         "Do not approve the contract or amendment as the implementation actor.",
     ]
+    if retry and reviewer_note:
+        common.extend([
+            "Reviewer feedback for this retry (context only; it does not amend the frozen contract or task authority):",
+            reviewer_note,
+        ])
     if retry:
         if request.mode == "new_change":
             common.extend(
@@ -1030,6 +1036,11 @@ class AgentRunManager:
                 retry_of=retry_of,
                 execution_context=execution_context,
                 sdd_execution=sdd_execution,
+                reviewer_note=(
+                    dict(self._record(retry_of).reviewer_note)
+                    if retry_of and self._record(retry_of).reviewer_note is not None
+                    else None
+                ),
             )
             self._append_timeline(record)
             self._runs[run_id] = record
@@ -1318,6 +1329,10 @@ class AgentRunManager:
                 planning_contract_run_id=planning_contract_run_id,
                 planning_context=planning_context,
                 source_artifacts=source_artifacts,
+                reviewer_note=(
+                    record.reviewer_note["text"]
+                    if record.retry_of and record.reviewer_note is not None else None
+                ),
             )
             process_env = os.environ.copy()
             process_env.pop("APATCH_EXECUTION_SOURCE_ARTIFACTS", None)

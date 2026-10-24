@@ -30,6 +30,13 @@ network. The selected agent CLI may still contact its own configured model provi
 5. Review the local diff and delivery pack. Retry or recover a failed run; commit or
    push only after your explicit confirmation.
 
+For a retry, enter the feedback in **Reviewer note** and select **Save note**
+before **Retry**. Studio copies that saved note into the new attempt and sends
+it to the agent, including after restarting Studio. The original request,
+frozen contract, task envelope, checks, budgets and current authority checks
+remain unchanged. A reviewer note supplies context; it cannot approve a contract
+amendment or grant additional access.
+
 ## Library and time
 
 **Library** exposes proven reusable methods, verification history, exported evidence
