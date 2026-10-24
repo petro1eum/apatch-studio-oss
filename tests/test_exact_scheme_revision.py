@@ -307,3 +307,48 @@ def test_admitted_retry_refreshes_authority_and_preserves_the_native_budget(worl
             m.guard_execution(request,ctx,current,stage=stage)
         assert not any(c[0]=='current_bundle' for c in calls)
         if failure=='budget':assert calls==[]
+
+
+@pytest.mark.parametrize("authority_current",[True,False])
+def test_finished_delivery_outlives_execution_budget_without_new_run(world,monkeypatch,authority_current):
+    from apatch_studio import exact_contract_handoffs as H
+    from apatch.task_budget import TaskBudget,TaskBudgetError
+    import time
+    m=world.manager;current=m._preflight(world.bundle,'SPEC-CONTROL#R1',review_revision=True)
+    proposal={k:'TEST-ONLY-'+k for k in ('intent_id','tenant_id','project_group_id','work_item_id','work_item_hash','authority_version','work_program_id','work_program_hash')}
+    world.bundle['legacy_intent']=proposal;world.bundle['handoff']['expires_at']='2026-10-20T00:00:00Z'
+    ctx=SimpleNamespace(**proposal,document_hash=G.document_hash(proposal),envelope_hash=G.envelope_hash(proposal))
+    row={'intent_id':proposal['intent_id'],'handoff_id':'TEST-ONLY','status':'consumed','company_waiting':True,
+        'requirement':'SPEC-CONTROL#R1','ack':{'ORIGINAL':'TEST-ONLY'},'facts':{'change_id':'TEST-ONLY'}}
+    m._update=lambda fn:fn([row]);m._preflight=lambda *a,**kw:current
+    m._delivery_attempt=lambda row:{'status':'succeeded','can_retry':False}
+    m._read_bundle=lambda row,**kw:world.bundle;m.clock=lambda:datetime(2026,10,21,tzinfo=timezone.utc)
+    m.gateway=SimpleNamespace(_workspace_key_provider=lambda:object())
+    source=SimpleNamespace(source_binding_id='TEST-ONLY',source_binding_hash='TEST-ONLY')
+    m.delivery=SimpleNamespace(selected=lambda identity:{'context':source},guard_context=lambda *args:source)
+    checked=[];m.trust.validate_bundle=lambda *a,**kw:checked.append('bundle')
+    monkeypatch.setattr(H.G,'load_change',lambda *a:{'change_id':'TEST-ONLY'})
+    monkeypatch.setattr(H.P,'acceptance_path',lambda *a:'TEST-ONLY')
+    monkeypatch.setattr(H,'read_json',lambda *a,**kw:{'TEST_ONLY':True})
+    monkeypatch.setattr(H.W,'validate_acceptance',lambda doc:doc)
+    def exchange(*a,**kw):
+        assert kw['historical'] is True and kw['original_ack']==row['ack'] and kw['source_context']==source
+        checked.append('authority')
+        if not authority_current:raise ValueError('Current authority revoked')
+        return row['ack']
+    m._exchange=exchange
+    budget=TaskBudget(str(m.workspace),current.task_envelope);before=budget.check();actual=time.time()
+    monkeypatch.setattr('apatch.task_budget.time.time',lambda:actual+3601)
+    with pytest.raises(TaskBudgetError):budget.check()
+    request=SimpleNamespace(mode='requirement',spec_id=current.spec_id,requirement_id=current.requirement_id)
+    if authority_current:
+        assert m.guard_execution(request,ctx,current,stage='build_evidence')==source
+        assert checked==['authority','bundle']
+    else:
+        with pytest.raises(ValueError,match='Current authority revoked'):
+            m.guard_execution(request,ctx,current,stage='build_evidence')
+        assert checked==['authority']
+    with pytest.raises(TaskBudgetError) as exhausted:budget.check()
+    assert exhausted.value.reason=='task_seconds_exhausted'
+    after=exhausted.value.state
+    assert (after['started_at'],after['deadline'])==(before['started_at'],before['deadline'])

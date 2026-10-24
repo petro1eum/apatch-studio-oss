@@ -82,3 +82,6 @@ client.
 - **A plan stops:** open the run card; Studio records the bounded failure and offers
   retry instead of leaving silent partial work.
 - **Cowork is unavailable:** local work, review, recovery and export remain usable.
+
+
+A completed exact delivery can be exported after its execution time budget expires. Studio still rechecks the current server authority, original acknowledgement, successful run, source binding and frozen test bytes. Starting or continuing execution keeps the original budget; export neither resets it nor creates another run.

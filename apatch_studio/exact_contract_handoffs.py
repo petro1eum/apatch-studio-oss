@@ -262,6 +262,8 @@ class ExactContractTrust:
 
 
 class ExactContractManager:
+    run_request_model = AgentRunRequest
+
     def __init__(self, workspace, *, run_manager, trust, state_root=None, gateway=None, clock=None,
                  actor_id=None, sdd_facade=None, http_client_factory=None, run_request_model=AgentRunRequest):
         self.workspace = Path(workspace).expanduser().resolve()
@@ -730,7 +732,7 @@ class ExactContractManager:
                 denied('Historical evidence requires a successful admitted attempt', 'exact_delivery_run_incomplete')
         bundle = self._read_bundle(row, historical=historical)
         current = self._preflight(bundle,row['requirement'])
-        if continuation or row.get('company_waiting') is True:
+        if stage in ('start', 'pre_popen') and (continuation or row.get('company_waiting') is True):
             # Resume the already admitted operation, not the expired transfer
             # token. The server revalidates its original ACK and active parties
             # below; the SAME durable task budget must still permit execution.
