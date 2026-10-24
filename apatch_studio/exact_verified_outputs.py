@@ -9,7 +9,7 @@ from apatch import sdd_integrity as S
 from apatch_studio.state_io import StateDirectory
 
 
-def verified_content(manager, attestation, contract, envelope):
+def verified_content(manager, attestation, contract, envelope, *, expected_mutation_ids=()):
     proof = attestation['payload'].get('sdd_evidence')
     if not contract.get('supersedes_hash') or not isinstance(proof, dict):
         raise ValueError('Fresh native revision verification required')
@@ -24,7 +24,7 @@ def verified_content(manager, attestation, contract, envelope):
             or (proof.get('actor') or {}) != {'actor_id': manager.actor_id, 'role':'implementation'}
             or proof.get('contract_hash') != contract['document_hash']
             or proof.get('envelope_hash') != envelope['document_hash']
-            or proof.get('task_envelope') != envelope or proof.get('mutation_ids') != []
+            or proof.get('task_envelope') != envelope or proof.get('mutation_ids') != list(expected_mutation_ids)
             or verification.get('session_id') != sid
             or (proof.get('adherence') or {}).get('status') != 'compliant'
             or decision.get('accepted') is not True or required < 1

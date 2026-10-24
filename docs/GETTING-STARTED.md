@@ -85,3 +85,5 @@ client.
 
 
 A completed exact delivery can be exported after its execution time budget expires. Studio still rechecks the current server authority, original acknowledgement, successful run, source binding and frozen test bytes. Starting or continuing execution keeps the original budget; export neither resets it nor creates another run.
+
+Unchanged delivery files may share a run with a real mutation. Their bytes must appear in the signed native verification snapshot for the exact contract and envelope. Every mutation named by that proof must also exist in the same native session, have its pinned signature, precede the attestation and carry the exact project source binding. An invented mutation, foreign source, later record or modified file still blocks delivery.

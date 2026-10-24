@@ -105,3 +105,38 @@ def test_old_partial_or_substituted_proof_cannot_qualify_an_unchanged_output(ver
     built=v.record(proof)
     with pytest.raises(ExecutionIntentError,match='not recorded'):
         verify_run_outputs(v.manager,v.source['binding_id'],built,[v.path],{v.path:data},profile)
+
+
+@pytest.mark.parametrize('fault',[None,'signature','source','session','invented','after_attestation'])
+def test_unchanged_file_with_real_signed_mutation_requires_exact_native_history(verified,fault):
+    import base64
+    v=verified;tc=TrustChain();public=base64.b64decode(tc.export_public_key())
+    def verify(raw,sig):
+        try:Ed25519PublicKey.from_public_bytes(public).verify(sig,raw);return True
+        except Exception:return False
+    provider=SimpleNamespace(get_public_key=lambda:public,verify=verify)
+    v.manager.gateway=SimpleNamespace(_workspace_key_provider=lambda:provider)
+    sid=v.proof['verification']['session_id'];source_ref=f"project-source-binding:{v.source['binding_id']}@{G.document_hash(v.source)}"
+    mutation={'session_id':'foreign' if fault=='session' else sid,'action':'chunk',
+        'files':{'src/changed.py':{'sha256':'a'*64}},'artifacts':['project-source-binding:foreign@sha256:'+'f'*64 if fault=='source' else source_ref]}
+    proof=copy.deepcopy(v.proof);proof['mutation_ids']=['invented' if fault=='invented' else 'op_0000']
+    payload={'session_id':sid,'artifacts':[source_ref,'spec:SPEC-CONTROL#R1@sha256:'+'2'*16],'sdd_evidence':seal(proof)}
+    def signed(tool,data):
+        value=asdict(tc.sign(tool,data=data));value['tool']=value.pop('tool_id');value['response_timestamp']=value['timestamp']
+        value.update(algorithm='ed25519',key_id='TEST-ONLY provider');return value
+    if fault=='after_attestation':
+        attestation=signed('apatch_attest',payload);record=signed('apatch',mutation)
+    else:
+        record=signed('apatch',mutation);attestation=signed('apatch_attest',payload)
+    if fault=='signature':record['signature']='A'*88
+    objects=v.manager.workspace/'.trustchain/objects'
+    (objects/'op_0000.json').write_text(json.dumps({'id':'op_0000','value':record}))
+    (objects/'op_0001.json').write_text(json.dumps({'id':'op_0001','value':attestation}))
+    rows=TrustChainHelper(str(v.manager.workspace),auto_init=False,read_only=True).iter_ledger_entries()
+    facts=G.derive_source_bound_attestation_facts(rows,binding=v.source)
+    built={'evidence_bundle':{'attestation_refs':[{k:f[k] for k in ('attestation_id','attestation_hash')} for f in facts]}}
+    if fault is None:
+        verify_run_outputs(v.manager,v.source['binding_id'],built,[v.path],{v.path:v.data},(v.contract,v.envelope))
+    else:
+        with pytest.raises(ExecutionIntentError):
+            verify_run_outputs(v.manager,v.source['binding_id'],built,[v.path],{v.path:v.data},(v.contract,v.envelope))

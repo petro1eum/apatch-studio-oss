@@ -75,7 +75,21 @@ def verify_run_outputs(manager, source_binding_id, built, candidates, files, exp
             from apatch_studio.exact_verified_outputs import verified_content
             if expected_profile is not None:
                 try:
-                    witnesses = [verified_content(manager, a, *expected_profile) for a in attestations.values()]
+                    from apatch.traceability import build_traceability_index
+                    index = build_traceability_index(rows).get('op_id_index') or {}
+                    witnesses = []
+                    source_ref = f"project-source-binding:{source['binding_id']}@{G.document_hash(source)}"
+                    for sid, attestation in attestations.items():
+                        mutation_ids = [identity for identity, summary in index.items()
+                            if summary.get('role') == 'mutation' and summary.get('governed_session_id') == sid]
+                        for identity in mutation_ids:
+                            mutations = [r for r in rows if r['id'] == identity]
+                            if (len(mutations) != 1 or not verified(mutations[0])
+                                    or _ledger_entry_order(mutations[0]) >= _ledger_entry_order(attestation)
+                                    or source_ref not in mutations[0]['payload'].get('artifacts', [])):
+                                raise ValueError('The native mutation history is unconfirmed')
+                        witnesses.append(verified_content(manager, attestation, *expected_profile,
+                            expected_mutation_ids=mutation_ids))
                     if witnesses and all(w.get(path, {}).get('sha256') == 'sha256:' + hashlib.sha256(files[path]).hexdigest() for w in witnesses):
                         continue
                 except (ValueError, OSError, KeyError, TypeError):
