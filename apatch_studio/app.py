@@ -749,7 +749,7 @@ def create_app(
 
     @app.post("/api/v1/governed-work/evidence/preview")
     def preview_governed_evidence(request: EvidencePreviewRequest) -> dict[str, Any]:
-        return evidence_gateway().preview_evidence(binding_id=request.binding_id)
+        return evidence_gateway().preview_evidence(**request.model_dump(exclude_none=True))
 
     @app.post("/api/v1/governed-work/evidence/publish")
     def publish_governed_evidence(request: EvidencePublicationRequest) -> dict[str, Any]:

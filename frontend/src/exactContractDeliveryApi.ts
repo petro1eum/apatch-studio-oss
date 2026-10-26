@@ -171,8 +171,9 @@ function validatePlan(raw: unknown): SharePlan {
   // Preserve exactly the native closed document. No UI role/root fields added.
   return value as SharePlan;
 }
-export async function previewExactEvidence(bindingId: string, signal?: AbortSignal): Promise<SharePlan> {
-  const value = await call("/api/v1/governed-work/evidence/preview", { binding_id: text(bindingId, SOURCE) }, signal);
+export async function previewExactEvidence(bindingId: string, signal?: AbortSignal, evidenceBundleHash?: string): Promise<SharePlan> {
+  const value = await call("/api/v1/governed-work/evidence/preview", { binding_id: text(bindingId, SOURCE),
+    ...(evidenceBundleHash === undefined ? {} : {evidence_bundle_hash: text(evidenceBundleHash, HASH)}) }, signal);
   if (value.ok !== true || value.operation !== "preview_evidence_publication") invalid();
   return validatePlan(value.plan);
 }

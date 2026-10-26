@@ -176,7 +176,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
   function preview() {
     if (!evidence) return;
     void act("preview", async (signal, stamp) => {
-      const result = await previewExactEvidence(evidence.source_binding_id, signal);
+      const result = await previewExactEvidence(evidence.source_binding_id, signal, evidence.evidence_bundle_hash);
       if (!current(stamp)) return;
       if (result.evidence_bundle_ref.bundle_hash !== evidence.evidence_bundle_hash || result.timesheet_ref.timesheet_hash !== evidence.timesheet_hash) throw new ExactDeliveryApiError("invalid_delivery_response");
       setPlan(result); setConsent(false); setPublication(null);

@@ -100,3 +100,17 @@ def test_unconfigured_publication_is_explicitly_unavailable(tmp_path):
             "origin": "http://127.0.0.1:8766"})
         assert response.status_code == 503
         assert response.json()["error_code"] == "governed_evidence_unconfigured"
+
+
+def test_exact_hash_is_forwarded_and_invalid_hash_never_reaches_gateway(configured):
+    client, gateway, calls = configured
+    seen = []
+    def exact(**kwargs):
+        seen.append(kwargs)
+        return {'ok': True, 'plan': PLAN}
+    gateway.preview_evidence = exact
+    body = {'binding_id': BINDING, 'evidence_bundle_hash': 'sha256:'+'e'*64}
+    assert client.post(PREVIEW, json=body).status_code == 200
+    assert seen == [body]
+    assert client.post(PREVIEW, json={**body, 'evidence_bundle_hash': '../foreign'}).status_code == 422
+    assert seen == [body]
