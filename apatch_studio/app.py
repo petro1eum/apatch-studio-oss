@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from apatch_studio import __version__
 from apatch_studio.exact_contract_handoffs import ExactContractTrust, ExactContractManager, ExactContractConfirmation
 from apatch_studio.exact_contract_delivery import EvidenceBuildRequest
+from pydantic import Field
 from apatch_studio.action_facade import (
     AssetActionRequest,
     AssetSearchRequest,
@@ -25,6 +26,10 @@ from apatch_studio.action_facade import (
     StudioWorkflowFacade,
     SystemActionRequest,
 )
+
+
+class ArtifactPublicationRequest(EvidenceBuildRequest):
+    expected_package_hash: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
 from apatch_studio.adapter import APatchStudioAdapter
 from apatch_studio.change_details import (
     ChangeDetailNotFound,
@@ -174,6 +179,7 @@ def create_app(
     exact_contract_trust: ExactContractTrust | None = None,
     exact_contract_manager: ExactContractManager | None = None,
     exact_contract_state_root: str | Path | None = None,
+    work_handoff_observer=None,
 ) -> FastAPI:
     frontend = Path(frontend_root) if frontend_root else _frontend_root()
     active_edition = StudioEdition.parse(edition)
@@ -743,13 +749,24 @@ def create_app(
 
     @app.post("/api/v1/governed-work/evidence/preview")
     def preview_governed_evidence(request: EvidencePreviewRequest) -> dict[str, Any]:
-        return evidence_gateway().preview_evidence(binding_id=request.binding_id)
+        return evidence_gateway().preview_evidence(**request.model_dump(exclude_none=True))
 
     @app.post("/api/v1/governed-work/evidence/publish")
     def publish_governed_evidence(request: EvidencePublicationRequest) -> dict[str, Any]:
         return evidence_gateway().publish_evidence(
             plan=request.plan, confirmation=request.confirmation,
         )
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/stop-for-reassignment")
+    async def stop_for_reassignment(handoff_id: str, request: Request) -> dict[str, Any]:
+        from apatch_studio.work_handoff_stop import StopUnavailable
+        from apatch_studio.work_handoff_delivery import WorkHandoffDelivery
+        if runtime_exact is None or work_handoff_observer is None:
+            raise ExecutionIntentError("Independent stop observation is not configured", code="handoff_stop_unconfigured", status_code=503)
+        try:
+            return WorkHandoffDelivery(runtime_exact,work_handoff_observer).stop(handoff_id,await request.json())
+        except StopUnavailable as exc:
+            raise ExecutionIntentError("Stop is not yet independently confirmed", code="handoff_stop_unconfirmed", status_code=409) from exc
 
     @app.post("/api/v1/exact-contract-handoffs/import")
     async def import_exact_contract(request: Request) -> dict[str, Any]:
@@ -805,6 +822,41 @@ def create_app(
         if runtime_exact is None:
             raise ExecutionIntentError("Exact contract delivery is not configured", code="exact_authority_unconfigured", status_code=503)
         return runtime_exact.build_for_delivery(handoff_id, request.run_id)
+
+    @app.post('/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence')
+    def company_capability_evidence(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError('Exact delivery is not configured',code='exact_contract_unconfigured',status_code=503)
+        from apatch_studio.cowork_capability_evidence import build_company_capability_evidence
+        from apatch.trust_identity import workspace_identity_scope
+        from apatch_studio.projection import assert_projection_safe
+        try:
+            with workspace_identity_scope(str(runtime_exact.workspace)):
+                bundle=build_company_capability_evidence(runtime_exact,handoff_id=handoff_id,run_id=request.run_id)
+            assert_projection_safe(bundle)
+        except Exception as exc:
+            raise ExecutionIntentError('The current Company source evidence is not ready',
+                code='company_source_evidence_unavailable',status_code=409) from exc
+        return {'schema':'apatch.studio.company-capability-evidence.v1','handoff_id':handoff_id,
+            'run_id':request.run_id,'evidence_bundle':bundle,'customer_accepted':False,'tracker_delivered':False}
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/preview-artifacts")
+    def preview_exact_artifacts(handoff_id: str, request: EvidenceBuildRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact delivery is not configured", code="exact_contract_unconfigured", status_code=503)
+        from apatch_studio.exact_contract_artifacts import preview_artifacts
+        from apatch.trust_identity import workspace_identity_scope
+        with workspace_identity_scope(str(runtime_exact.workspace)):
+            return preview_artifacts(runtime_exact, handoff_id, request.run_id)
+
+    @app.post("/api/v1/exact-contract-handoffs/{handoff_id}/publish-artifacts")
+    def publish_exact_artifacts(handoff_id: str, request: ArtifactPublicationRequest) -> dict[str, Any]:
+        if runtime_exact is None:
+            raise ExecutionIntentError("Exact delivery is not configured", code="exact_contract_unconfigured", status_code=503)
+        from apatch_studio.exact_contract_artifacts import publish_artifacts
+        from apatch.trust_identity import workspace_identity_scope
+        with workspace_identity_scope(str(runtime_exact.workspace)):
+            return publish_artifacts(runtime_exact, handoff_id, request.run_id, expected_package_hash=request.expected_package_hash)
 
 
 

@@ -14,7 +14,7 @@ export interface ExactContractDelivery {
   handoff_id: string;
   run_id: string | null;
   requirement: string | null;
-  status: "not_selected" | "pending_source_ack" | "source_acknowledged";
+  status: "not_selected" | "pending_source_ack" | "source_acknowledged" | "awaiting_company";
   source_binding_id: string | null;
   source_binding_hash: string | null;
 }
@@ -43,6 +43,34 @@ export interface SharePlan {
 export interface PublicationResult {
   synchronization: { status: "acknowledged" | "queued" | "not_checked_this_request"; delivered: number; pending: number };
   customer_decision: "not_requested";
+}
+export interface ArtifactPreview {
+  handoff_id: string; run_id: string; package_hash: string; platform_origin: string; project_group_id: string;
+  files: Array<{path: string; sha256: string}>;
+}
+
+export async function previewExactArtifacts(handoffId: string, runId: string, signal?: AbortSignal): Promise<ArtifactPreview> {
+  const v = await call(endpoint(handoffId) + '/preview-artifacts', {confirmed: true, run_id: text(runId, RUN)}, signal);
+  if (v.schema !== 'apatch.studio.exact-artifact-preview.v1' || v.handoff_id !== handoffId || v.run_id !== runId
+      || v.customer_accepted !== false || !Array.isArray(v.files) || !v.files.length || v.files.length > 256) invalid();
+  text(v.package_hash, HASH); text(v.project_group_id, /^tcpg_[a-f0-9]{32}$/);
+  const origin = new URL(v.platform_origin);
+  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) invalid();
+  const files: Array<{path: string; sha256: string}> = v.files.map((value: unknown) => { const f = object(value); exactKeys(f, ['path', 'sha256']);
+    if (typeof f.path !== 'string' || !f.path || f.path.length > 256 || f.path.split('/').some((p: string) => !p || p.startsWith('.'))
+        || f.path.includes('\\') || /[\x00-\x1f]/.test(f.path)) invalid();
+    return {path: f.path, sha256: text(f.sha256, HASH)}; });
+  if (new Set(files.map(f => f.path)).size !== files.length) invalid();
+  return {handoff_id: handoffId, run_id: runId, package_hash: v.package_hash, platform_origin: origin.origin,
+    project_group_id: v.project_group_id, files};
+}
+
+export async function publishExactArtifacts(preview: ArtifactPreview, signal?: AbortSignal): Promise<void> {
+  const v = await call(endpoint(preview.handoff_id) + '/publish-artifacts', {confirmed: true,
+    run_id: text(preview.run_id, RUN), expected_package_hash: text(preview.package_hash, HASH)}, signal);
+  if (v.schema !== 'apatch.studio.exact-artifact-delivery.v1' || v.handoff_id !== preview.handoff_id || v.run_id !== preview.run_id
+      || v.package_hash !== preview.package_hash || v.file_count !== preview.files.length || v.delivered !== true
+      || v.customer_accepted !== false) invalid();
 }
 
 const HASH = /^sha256:[0-9a-f]{64}$/;
@@ -105,7 +133,7 @@ export async function readExactChoices(handoffId: string, signal?: AbortSignal):
 function delivery(value: Raw, handoffId: string): ExactContractDelivery {
   if (value.schema !== "apatch.studio.exact-contract-delivery-view.v1" || value.handoff_id !== handoffId
     || value.customer_accepted !== false || value.ready_for_publication !== false
-    || !["not_selected", "pending_source_ack", "source_acknowledged"].includes(value.status)) invalid();
+    || !["not_selected", "pending_source_ack", "source_acknowledged", "awaiting_company"].includes(value.status)) invalid();
   return { handoff_id: handoffId, run_id: value.run_id === null ? null : text(value.run_id, RUN),
     requirement: value.requirement === null ? null : text(value.requirement, REQUIREMENT), status: value.status,
     source_binding_id: value.source_binding_id === null ? null : text(value.source_binding_id, SOURCE),
@@ -143,8 +171,9 @@ function validatePlan(raw: unknown): SharePlan {
   // Preserve exactly the native closed document. No UI role/root fields added.
   return value as SharePlan;
 }
-export async function previewExactEvidence(bindingId: string, signal?: AbortSignal): Promise<SharePlan> {
-  const value = await call("/api/v1/governed-work/evidence/preview", { binding_id: text(bindingId, SOURCE) }, signal);
+export async function previewExactEvidence(bindingId: string, signal?: AbortSignal, evidenceBundleHash?: string): Promise<SharePlan> {
+  const value = await call("/api/v1/governed-work/evidence/preview", { binding_id: text(bindingId, SOURCE),
+    ...(evidenceBundleHash === undefined ? {} : {evidence_bundle_hash: text(evidenceBundleHash, HASH)}) }, signal);
   if (value.ok !== true || value.operation !== "preview_evidence_publication") invalid();
   return validatePlan(value.plan);
 }
@@ -155,4 +184,26 @@ export async function publishExactEvidence(plan: SharePlan, signal?: AbortSignal
   if (value.ok !== true || value.operation !== "publish_evidence" || value.plan_hash !== plan.plan_hash || value.customer_decision !== "not_requested"
     || !["acknowledged", "queued", "not_checked_this_request"].includes(synchronization.status)) invalid();
   return { synchronization: { status: synchronization.status, delivered: count(synchronization.delivered), pending: count(synchronization.pending) }, customer_decision: "not_requested" };
+}
+
+/** A performer cannot supply stop facts; the independent native observer computes them. */
+export async function stopExactWorkForReassignment(handoffId:string,workspaceId:string,signal?:AbortSignal):Promise<"stop_requested"|"stopped"|"completed"> {
+  const value=await call(endpoint(handoffId)+"/stop-for-reassignment",{workspace_id:text(workspaceId,/^[0-9a-f]{32}$/)},signal);
+  if(value.schema!=="trustchain.cowork.work-handoff.v1" || !["stop_requested","stopped","completed"].includes(value.state)
+    || !value.request || !/^tcwh_[0-9a-f]{32}$/.test(value.request.request_id)
+    || !Array.isArray(value.acknowledged_observers) || value.acknowledged_observers.length===0) invalid();
+  return value.state;
+}
+
+
+export async function exportCompanyEvidence(handoffId: string, runId: string, signal?: AbortSignal) {
+  const value=await call(endpoint(handoffId)+'/company-capability-evidence',
+    {confirmed:true,run_id:text(runId,RUN)},signal);
+  if(value.schema!=='apatch.studio.company-capability-evidence.v1' || value.handoff_id!==handoffId
+      || value.run_id!==runId || value.customer_accepted!==false || value.tracker_delivered!==false) invalid();
+  const bundle=object(value.evidence_bundle);
+  if(bundle.kind!=='capability_evidence' || bundle.schema_version!==2 || bundle.source!=='apatch'
+      || !Array.isArray(bundle.episodes) || bundle.episodes.length<1 || !bundle.signature) invalid();
+  text(bundle.bundle_id,/^[0-9a-f]{40}$/);
+  return bundle;
 }

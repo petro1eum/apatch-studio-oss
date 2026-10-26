@@ -1,0 +1,20 @@
+.............................................................            [100%]
+=============================== warnings summary ===============================
+../studio-residuals/apatch_studio/operations.py:38
+  /Users/edcher/Documents/Codex/2026-10-21/cowork-full-release/studio-residuals/apatch_studio/operations.py:38: UserWarning: Field name "schema" in "ExecutionContext" shadows an attribute in parent "BaseModel"
+    class ExecutionContext(BaseModel):
+
+../studio-residuals/apatch_studio/operations.py:64
+  /Users/edcher/Documents/Codex/2026-10-21/cowork-full-release/studio-residuals/apatch_studio/operations.py:64: UserWarning: Field name "schema" in "SddExecutionContext" shadows an attribute in parent "BaseModel"
+    class SddExecutionContext(BaseModel):
+
+../studio-residuals/apatch_studio/execution_intents.py:77
+  /Users/edcher/Documents/Codex/2026-10-21/cowork-full-release/studio-residuals/apatch_studio/execution_intents.py:77: UserWarning: Field name "schema" in "ExecutionIntentEnvelope" shadows an attribute in parent "BaseModel"
+    class ExecutionIntentEnvelope(BaseModel):
+
+../studio-residuals/apatch_studio/exact_contract_delivery.py:31
+  /Users/edcher/Documents/Codex/2026-10-21/cowork-full-release/studio-residuals/apatch_studio/exact_contract_delivery.py:31: UserWarning: Field name "schema" in "SourceBoundExecutionContext" shadows an attribute in parent "BaseModel"
+    class SourceBoundExecutionContext(BaseModel):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+61 passed, 4 warnings in 5.74s

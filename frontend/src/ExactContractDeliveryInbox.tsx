@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { WorkHandoffStopControl } from "./WorkHandoffStopControl";
 import type { RunnerInfo, WorkspaceOverview } from "./types";
+import { exactLocalVerificationState } from "./productLanguage";
 import {
   ExactDeliveryApiError, buildExactEvidence, importExactContract, listExactContracts,
   previewExactEvidence, publishExactEvidence, readExactChoices, readExactDelivery,
   readExactRun, runExactForDelivery,
+  previewExactArtifacts, publishExactArtifacts, exportCompanyEvidence,
 } from "./exactContractDeliveryApi";
-import type { EvidenceReady, ExactContractChoices, ExactContractDelivery, ExactContractRow, PublicationResult, SharePlan } from "./exactContractDeliveryApi";
+import type { ArtifactPreview, EvidenceReady, ExactContractChoices, ExactContractDelivery, ExactContractRow, PublicationResult, SharePlan } from "./exactContractDeliveryApi";
 
 const words = {
   en: { title: "Contracts with the customer", note: "Tests are fixed by the signed agreement. Studio cannot change them or accept work for the customer.",
@@ -17,11 +20,19 @@ const words = {
     queued: "Waiting for a valid platform receipt. The customer still decides; work is not accepted.",
     cached: "Previously recorded delivery; a new receipt was not checked. The customer still decides.",
     local: "Evidence is ready locally. Nothing has been published.", notRun: "Execution has not started.", running: "Local execution is not yet verified.",
-    verified: "Local tests passed. This is evidence, not customer acceptance.", ack: "Source acknowledgement received.",
+    verified: "Local tests passed. This is evidence, not customer acceptance.", finished: "The agent finished. Prepare signed evidence to confirm the agreed tests.", ack: "Source acknowledgement received.",
+    companyWaiting: "Waiting for Company confirmation. Execution has not started.", companyContinue: "Check Company confirmation and continue",
     sourceWaiting: "Source acknowledgement is still pending; execution/evidence is not ready.", recipient: "Recipient", selection: "Selection",
     bundle: "Evidence record", time: "Time record", proof: "Agreement and proof references", requirement: "Agreed requirement",
     error: "This operation could not be completed. Refresh the selected contract before retrying.", changed: "The workspace, account or selection changed. Open the current contract and preview again.",
     importTitle: "Import a signed agreement", importLabel: "Signed agreement from the customer", import: "Import agreement", choose: "Select a contract to continue.",
+    artifactPreview: "Preview result files", artifactSend: "Send these files to the project", artifactConsent: "Deliver only these agreed result and check files to this project.",
+    artifactDone: "Exact files delivered. On the site, receive them into your sandbox and run the stage checks. This is not acceptance.",
+    expired: "This short handoff expired before execution. Return to the site and resend the same agreed contract; new consents are not required if the terms are unchanged.",
+    outputChanged: "The files do not match the signed output of this run. Check its result or complete a new authorized attempt; the old run is not reused as proof for changed files.",
+    trackerExport: "Download signed evidence for Tracker",
+    trackerUnavailable: "Company confirmation and a new execution after that confirmation are required for this export.",
+    previewChanged: "The files changed after preview. Review the exact file selection again before sending.",
   },
   ru: { title: "Договоры с заказчиком", note: "Тесты закреплены подписанным договором. Studio не может менять их или принимать работу за заказчика.",
     empty: "Согласованных договоров пока нет.", unavailable: "Передача согласованного договора ещё не настроена для этой рабочей области.",
@@ -32,11 +43,19 @@ const words = {
     queued: "Ждём действительную квитанцию платформы. Работа ещё не принята заказчиком.",
     cached: "Доставка ранее отмечена; новая квитанция не проверялась. Решение остаётся за заказчиком.",
     local: "Доказательства готовы локально. Ничего не опубликовано.", notRun: "Выполнение ещё не началось.", running: "Локальное выполнение ещё не проверено.",
-    verified: "Локальные тесты прошли. Это доказательства, а не приёмка заказчиком.", ack: "Привязка к источнику подтверждена.",
+    verified: "Локальные тесты прошли. Это доказательства, а не приёмка заказчиком.", finished: "Агент завершил работу. Подготовьте подписанные доказательства, чтобы подтвердить согласованные тесты.", ack: "Привязка к источнику подтверждена.",
+    companyWaiting: "Ждём подтверждения Company. Выполнение ещё не началось.", companyContinue: "Проверить подтверждение Company и продолжить",
     sourceWaiting: "Подтверждение источника ещё ожидается; выполнение и доказательства не готовы.", recipient: "Получатель", selection: "Состав",
     bundle: "Запись доказательств", time: "Запись времени", proof: "Ссылки на договор и доказательства", requirement: "Согласованное требование",
     error: "Операцию не удалось завершить. Обновите выбранный договор перед повтором.", changed: "Рабочая область, аккаунт или выбор изменились. Откройте текущий договор и проверьте состав заново.",
     importTitle: "Импортировать подписанный договор", importLabel: "Подписанный договор от заказчика", import: "Импортировать договор", choose: "Выберите договор для продолжения.",
+    artifactPreview: "Проверить состав файлов результата", artifactSend: "Передать эти файлы в проект", artifactConsent: "Передать в этот проект только перечисленные файлы результата и согласованных проверок.",
+    artifactDone: "Точные файлы доставлены. На сайте получите их в свою песочницу и выполните проверки этапов. Это не приёмка.",
+    expired: "Короткая передача истекла до начала исполнения. Вернитесь на сайт и повторно передайте тот же договор; если условия не менялись, новые согласия не нужны.",
+    outputChanged: "Файлы не совпадают с подписанным результатом этого запуска. Проверьте результат или выполните новую разрешённую попытку; старый запуск не подтверждает изменённые файлы.",
+    trackerExport: "Скачать подписанные доказательства для Tracker",
+    trackerUnavailable: "Для этой передачи нужны подтверждение Company и новый запуск после подтверждения.",
+    previewChanged: "После предпросмотра файлы изменились. Снова проверьте точный состав перед отправкой.",
   },
 };
 
@@ -64,6 +83,8 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
   const [plan, setPlan] = useState<SharePlan | null>(null);
   const [consent, setConsent] = useState(false);
   const [publication, setPublication] = useState<PublicationResult | null>(null);
+  const [artifactPlan, setArtifactPlan] = useState<ArtifactPreview | null>(null);
+  const [artifactConsent, setArtifactConsent] = useState(false), [artifactDone, setArtifactDone] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [envelope, setEnvelope] = useState("");
@@ -78,6 +99,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
     requests.current.clear(); busyRef.current = false; setBusy(null);
     setChoices(null); setRequirement(""); setDelivery(null); setRunStatus(null);
     setEvidence(null); setPlan(null); setConsent(false); setPublication(null); setError(null);
+    setArtifactPlan(null); setArtifactConsent(false); setArtifactDone(false);
   }
   function current(stamp: number) { return epoch.current === stamp && scopeRef.current === scope; }
   async function act(kind: string, work: (signal: AbortSignal, stamp: number) => Promise<void>) {
@@ -91,7 +113,9 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         const code = reason instanceof ExactDeliveryApiError ? reason.code : "delivery_request_failed";
         const changed = ["publication_context_changed", "workspace_identity_mismatch", "publication_preview_required"].includes(code);
         if (changed) { setPlan(null); setConsent(false); setPublication(null); }
-        setError(changed ? t.changed : t.error);
+        if (code === 'artifact_package_changed') { setArtifactPlan(null); setArtifactConsent(false); setArtifactDone(false); }
+        setError(code === 'company_source_evidence_unavailable' ? t.trackerUnavailable : code === 'exact_contract_expired' ? t.expired : code === 'artifact_package_changed' ? t.previewChanged
+          : ['artifact_output_changed', 'artifact_output_unconfirmed'].includes(code) ? t.outputChanged : changed ? t.changed : t.error);
       }
     } finally {
       requests.current.delete(controller);
@@ -134,12 +158,14 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
     if (!selected) return;
     void act("refresh", async (signal, stamp) => {
       const result = await readExactDelivery(selected.handoff_id, signal);
+      if (current(stamp) && result.run_id !== delivery?.run_id) { setEvidence(null); setPlan(null); setConsent(false); setPublication(null); }
       if (!current(stamp)) return; setDelivery(result);
       if (result.run_id) { const status = await readExactRun(result.run_id, signal); if (current(stamp)) setRunStatus(status); }
     });
   }
   function build() {
     if (!selected || !delivery?.run_id || delivery.status !== "source_acknowledged" || runStatus !== "succeeded") return;
+    setEvidence(null); setPlan(null); setConsent(false); setPublication(null);
     void act("build", async (signal, stamp) => {
       const result = await buildExactEvidence(selected.handoff_id, delivery.run_id!, signal);
       if (!current(stamp)) return;
@@ -150,7 +176,7 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
   function preview() {
     if (!evidence) return;
     void act("preview", async (signal, stamp) => {
-      const result = await previewExactEvidence(evidence.source_binding_id, signal);
+      const result = await previewExactEvidence(evidence.source_binding_id, signal, evidence.evidence_bundle_hash);
       if (!current(stamp)) return;
       if (result.evidence_bundle_ref.bundle_hash !== evidence.evidence_bundle_hash || result.timesheet_ref.timesheet_hash !== evidence.timesheet_hash) throw new ExactDeliveryApiError("invalid_delivery_response");
       setPlan(result); setConsent(false); setPublication(null);
@@ -174,18 +200,19 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
         <button className="oi-button oi-button-secondary" type="button" key={item.handoff_id} data-testid={"exact-contract-open-" + item.handoff_id}
           onClick={() => choose(item)}>{t.open} {index + 1}</button>)}</div>}
       {selected ? <article style={{ marginTop: 16 }} data-testid="exact-contract-selected" data-handoff-id={selected.handoff_id}>
+        {selected.status === "consumed" && workspaceId && <WorkHandoffStopControl key={scope + selected.handoff_id} handoffId={selected.handoff_id} workspaceId={workspaceId} />}
         {!choices ? <p role="status">{t.loading}</p> : <>
           <div className="oi-action-row" style={{ flexWrap: "wrap", alignItems: "end" }}>
             <label className="oi-field"><span>{t.check}</span><select data-testid="exact-contract-requirement" value={requirement}
-              disabled={busy !== null || delivery?.status === "source_acknowledged"} onChange={event => { setRequirement(event.target.value); setPlan(null); setConsent(false); setEvidence(null); setPublication(null); }}>
+              disabled={busy !== null || (delivery?.status === "source_acknowledged" || delivery?.status === "awaiting_company")} onChange={event => { setRequirement(event.target.value); setPlan(null); setConsent(false); setEvidence(null); setPublication(null); }}>
               {choices.requirements.map((item, index) => <option key={item.requirement} value={item.requirement}>{t.check} {index + 1}</option>)}
             </select></label>
-            <label className="oi-field"><span>{t.runner}</span><select data-testid="exact-contract-runner" value={runner} disabled={busy !== null || delivery?.status === "source_acknowledged"}
+            <label className="oi-field"><span>{t.runner}</span><select data-testid="exact-contract-runner" value={runner} disabled={busy !== null || (delivery?.status === "source_acknowledged" || delivery?.status === "awaiting_company")}
               onChange={event => setRunner(event.target.value as "codex" | "claude")}>{availableRunners.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
             <button className="oi-button oi-button-primary" type="button" data-testid="exact-contract-run" onClick={run}
-              disabled={busy !== null || !requirement || !availableRunners.some(item => item.id === runner) || Boolean(delivery?.run_id)}>{t.run}</button>
+              disabled={busy !== null || !requirement || !availableRunners.some(item => item.id === runner) || Boolean(delivery?.run_id)}>{delivery?.status === "awaiting_company" ? t.companyContinue : t.run}</button>
           </div>
-          <p role="status">{delivery?.status === "pending_source_ack" ? t.sourceWaiting : runStatus === "succeeded" ? t.verified : delivery?.run_id ? t.running : t.notRun}</p>
+          <p role="status">{delivery?.status === "awaiting_company" ? t.companyWaiting : delivery?.status === "pending_source_ack" ? t.sourceWaiting : t[exactLocalVerificationState(runStatus, delivery?.run_id ?? null, evidence)]}</p>
           <div className="oi-action-row" style={{ flexWrap: "wrap" }}>
             <button className="oi-button oi-button-secondary" type="button" disabled={busy !== null} onClick={refresh}>{t.refresh}</button>
             <button className="oi-button oi-button-secondary" type="button" data-testid="exact-contract-build" onClick={build}
@@ -203,6 +230,30 @@ export function ExactContractDeliveryInbox({ data, runners, onChanged }: {
           </div> : null}
           {publication ? <p role="status" data-testid="exact-evidence-delivery-status">{publication.synchronization.status === "acknowledged" ? t.received
             : publication.synchronization.status === "queued" ? t.queued : t.cached}</p> : null}
+          {runStatus === 'succeeded' && evidence && <button type="button" className="oi-button oi-button-secondary"
+            disabled={busy!==null} data-testid="company-evidence-export" onClick={()=>void act('company-export',async(signal,stamp)=>{
+              const bundle=await exportCompanyEvidence(selected.handoff_id,evidence.run_id,signal);
+              if(!current(stamp))return;
+              const url=URL.createObjectURL(new Blob([JSON.stringify(bundle,null,2)+'\n'],{type:'application/json'}));
+              const link=document.createElement('a');link.href=url;link.download='CapabilityEvidence-'+bundle.bundle_id+'.json';
+              link.click();URL.revokeObjectURL(url);
+            })}>{t.trackerExport}</button>}
+          {runStatus === 'succeeded' && evidence && <button type="button" className="oi-button oi-button-secondary"
+            disabled={busy !== null} data-testid="exact-artifacts-preview" onClick={() => void act('artifacts-preview', async (signal, stamp) => {
+              const value = await previewExactArtifacts(selected.handoff_id, evidence.run_id, signal);
+              if (current(stamp)) { setArtifactPlan(value); setArtifactConsent(false); setArtifactDone(false); }
+            })}>{t.artifactPreview}</button>}
+          {artifactPlan && <div><p>{t.recipient}: {artifactPlan.platform_origin} · {artifactPlan.project_group_id}</p>
+            <ul>{artifactPlan.files.map(file => <li key={file.path}>{file.path}</li>)}</ul>
+            <label><input type="checkbox" data-testid="exact-artifacts-consent" checked={artifactConsent} disabled={busy !== null}
+              onChange={event => setArtifactConsent(event.target.checked)} />{t.artifactConsent}</label>
+            <button type="button" className="oi-button oi-button-primary" disabled={busy !== null || !artifactConsent}
+              data-testid="exact-artifacts-publish" onClick={() => void act('artifacts-publish', async (signal, stamp) => {
+                await publishExactArtifacts(artifactPlan, signal);
+                if (current(stamp)) { setArtifactDone(true); setArtifactConsent(false); }
+              })}>{t.artifactSend}</button>
+          </div>}
+          {artifactDone && <p role="status">{t.artifactDone}</p>}
           <details className="oi-proof"><summary>{t.proof}</summary><dl><dt>{t.requirement}</dt><dd>{requirement}</dd>
             {delivery?.source_binding_id ? <><dt>{t.ack}</dt><dd>{delivery.source_binding_id}</dd></> : null}</dl></details>
         </>}

@@ -1,0 +1,11 @@
+{
+  "schema": "trustchain.cowork.qa-handoff-installation.v1",
+  "files": {
+    "qa_handoff.py": "sha256:3d0d4612ec4aba3257a8ed4783ce356d1198de86bffc171d477d088fa8f74a71",
+    "qa_handoff_cli.py": "sha256:4b0c9e174debf3c66a432ad09000aba910843925703a85e2604c609d0efe1176",
+    "studio/apatch_studio/__init__.py": "sha256:824b4dc2dac1ce6f4e09c0d6af757fbe04c6ec2406c5a6ed489949a9309146d3",
+    "studio/apatch_studio/work_handoff_stop.py": "sha256:8c6010639a1de117cc010dc1f1643011882af6faf76a76416428198f554879f1",
+    "studio/apatch_studio/state_io.py": "sha256:6a9ceb8e073e8eb2c359177a84e070027029f32ea6fa29883bf8be61ec2470f7"
+  },
+  "program_sha256": "sha256:6612b7b9f19b27b2485393207fa558f4e5003aab08415eded8fa0065a6e95970"
+}

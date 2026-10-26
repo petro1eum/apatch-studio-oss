@@ -80,7 +80,7 @@ def test_runner_catalog_and_argv_are_allowlisted():
         "--cd",
         "/fixed/workspace",
         "--approve-for-me",
-        *RunnerCatalog._codex_mcp_overrides(),
+        *RunnerCatalog._codex_mcp_overrides(workspace),
         "-",
     ]
     assert claude == [
@@ -92,7 +92,7 @@ def test_runner_catalog_and_argv_are_allowlisted():
         "--permission-mode",
         "auto",
         "--mcp-config",
-        json.dumps({"mcpServers": {"apatch": RunnerCatalog.apatch_mcp_server()}}, sort_keys=True),
+        json.dumps({"mcpServers": {"apatch": RunnerCatalog.apatch_mcp_server(workspace)}}, sort_keys=True),
         "--strict-mcp-config",
     ]
     joined = " ".join(codex + claude)
@@ -226,3 +226,35 @@ def test_safe_projection_redacts_raw_runner_output(tmp_path):
         "pid",
     ]:
         assert forbidden not in serialized
+
+
+def test_retry_transports_saved_reviewer_feedback_without_changing_request(tmp_path):
+    captured = tmp_path / "runner-prompts.jsonl"
+    code = (
+        "import json,sys; from pathlib import Path; "
+        f"p=Path({str(captured)!r}); "
+        "text=sys.stdin.read(); "
+        "p.open('a').write(json.dumps(text)+'\\n'); sys.exit(1)"
+    )
+    manager = make_manager(tmp_path, catalog=PythonCatalog(code))
+    original = request("requirement")
+    first = manager.wait(manager.start(original)["run_id"], timeout=3)
+    assert first["status"] == "failed"
+    note = "Owner approved only the isolated Studio product test; preserve the frozen checks and scope."
+    manager.save_reviewer_note(first["run_id"], note)
+    # Feedback must survive Studio restart and reach the actual retry stdin.
+    manager.close()
+    manager = make_manager(tmp_path, catalog=PythonCatalog(code))
+    retried = manager.retry(first["run_id"])
+    completed = manager.wait(retried["run_id"], timeout=3)
+    assert completed["status"] == "failed"
+    prompts = [json.loads(line) for line in captured.read_text().splitlines()]
+    assert len(prompts) == 2
+    assert note not in prompts[0]
+    assert note in prompts[1]
+    assert "does not amend the frozen contract or task authority" in prompts[1]
+    assert completed["objective"] == original.objective
+    assert completed["retry_of"] == first["run_id"]
+    records = RunStore(tmp_path / "workspace", state_root=tmp_path / "state").load()
+    assert all(row["request"] == original.model_dump() for row in records.records)
+    manager.close()

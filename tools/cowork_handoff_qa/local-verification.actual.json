@@ -1,0 +1,34 @@
+{
+  "schema": "trustchain.cowork.qa-handoff-local-verification.v1",
+  "status": "local_candidate_not_deployed",
+  "production_calls": false,
+  "docker_calls": false,
+  "key_generation": false,
+  "program_sha256": "sha256:6612b7b9f19b27b2485393207fa558f4e5003aab08415eded8fa0065a6e95970",
+  "source_tar_sha256": "sha256:e6a900a67e34484cbb0a1029fdf66f602d73ad6959c915b7ab3854a67192f0b6",
+  "contour_tests": {
+    "passed": 61,
+    "log": "native-and-observer-tests.actual.log",
+    "sha256": "sha256:56734f57bd1bf0a9c1a28b6089ca5803235913099a6bf6f2617ab5795ce429bf"
+  },
+  "existing_studio_tests": {
+    "passed": 54,
+    "log": "studio-existing-regression.actual.log",
+    "sha256": "sha256:0e685d1e0f08d3dad33b212b5a7c5cc985fef084fba404fd3efe2a18161c0bf2"
+  },
+  "notes": [
+    "Local current Platform/SSH/Docker/cgroup boundaries are doubles; actual Linux proof pending.",
+    "Real native RunStore/child and real Core source/SPEC signature validation exercised.",
+    "Original stop tests and existing Studio tests are unchanged.",
+    "No production key generated. Known public RFC8032 vector used only in temporary test directories."
+  ],
+  "git_package_tests": {
+    "passed": 61,
+    "log": "git-package-tests.actual.log",
+    "sha256": "sha256:b4d2eae639b9ced24eb9ca88935da44bd6228623e185e83d3fd80374d28ab3c2"
+  },
+  "peer_review": {
+    "agent": "remaining_closeout",
+    "result": "No material authority/runtime defect found in native lifecycle and CLI; no live containment claim"
+  }
+}

@@ -30,6 +30,13 @@ network. The selected agent CLI may still contact its own configured model provi
 5. Review the local diff and delivery pack. Retry or recover a failed run; commit or
    push only after your explicit confirmation.
 
+For a retry, enter the feedback in **Reviewer note** and select **Save note**
+before **Retry**. Studio copies that saved note into the new attempt and sends
+it to the agent, including after restarting Studio. The original request,
+frozen contract, task envelope, checks, budgets and current authority checks
+remain unchanged. A reviewer note supplies context; it cannot approve a contract
+amendment or grant additional access.
+
 ## Library and time
 
 **Library** exposes proven reusable methods, verification history, exported evidence
@@ -75,3 +82,10 @@ client.
 - **A plan stops:** open the run card; Studio records the bounded failure and offers
   retry instead of leaving silent partial work.
 - **Cowork is unavailable:** local work, review, recovery and export remain usable.
+
+
+A completed exact delivery can be exported after its execution time budget expires. Studio still rechecks the current server authority, original acknowledgement, successful run, source binding and frozen test bytes. Starting or continuing execution keeps the original budget; export neither resets it nor creates another run.
+
+Unchanged delivery files may share a run with a real mutation. Their bytes must appear in the signed native verification snapshot for the exact contract and envelope. Every mutation named by that proof must also exist in the same native session, have its pinned signature, precede the attestation and carry the exact project source binding. An invented mutation, foreign source, later record or modified file still blocks delivery.
+
+The same mixed-file delivery applies to a first contract when a genuine verified mutation exists. Reusing unchanged outputs without any mutation continues to require a fresh agreed revision and complete native verification.

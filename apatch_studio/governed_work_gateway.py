@@ -56,6 +56,7 @@ class GovernedWorkGatewayError(RuntimeError):
 class EvidencePreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     binding_id: str = Field(pattern=r"^tcpsb_[0-9a-f]{32}$")
+    evidence_bundle_hash: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
 
 
 class EvidencePublicationRequest(BaseModel):
@@ -323,14 +324,15 @@ class APatchGovernedWorkGateway:
                 code="publication_context_changed",
             ) from None
 
-    def preview_evidence(self, *, binding_id):
+    def preview_evidence(self, *, binding_id, evidence_bundle_hash=None):
         """Read only one content-free native plan; replace prior selection."""
         with self._publication_lock, workspace_identity_scope(str(self.workspace)):
             self._publication_selection = None
             try:
                 context, _provider = self._publication_context()
                 result = self._api.preview_governed_evidence_publication(
-                    str(self.workspace), binding_id=binding_id
+                    str(self.workspace), binding_id=binding_id,
+                    **({"evidence_bundle_hash": evidence_bundle_hash} if evidence_bundle_hash is not None else {}),
                 )
                 if result.get("ok") is not True:
                     raise GovernedWorkGatewayError(
@@ -341,7 +343,8 @@ class APatchGovernedWorkGateway:
 
                 plan = runtime_api._validated_share_plan(result["plan"])
                 body = {key: value for key, value in plan.items() if key != "plan_hash"}
-                if (plan["plan_hash"] != self._domain.value_hash(body)
+                if ((evidence_bundle_hash is not None and plan["evidence_bundle_ref"]["bundle_hash"] != evidence_bundle_hash)
+                        or plan["plan_hash"] != self._domain.value_hash(body)
                         or plan["connection_generation"] != context["connection_generation"]):
                     raise GovernedWorkGatewayError(
                         "The native publication plan is invalid",

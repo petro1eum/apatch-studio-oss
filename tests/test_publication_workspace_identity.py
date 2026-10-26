@@ -78,3 +78,21 @@ def test_scope_is_restored_after_native_publication_refusal(case):
     assert calls == ['preview']
     assert active_workspace_identity_scope() is None
     assert G._load_local_provider(str(root)).get_public_key() == previous
+
+
+def test_preview_pins_requested_hash_and_rejects_a_different_native_selection(case):
+    root, gateway, calls, plan, previous = case
+    selected = plan['evidence_bundle_ref']['bundle_hash']
+    original = gateway._api.preview_governed_evidence_publication
+    def exact(*args, **kwargs):
+        assert kwargs['evidence_bundle_hash'] == selected
+        return original(*args, **kwargs)
+    gateway._api.preview_governed_evidence_publication = exact
+    assert gateway.preview_evidence(binding_id='tcpsb_'+'6'*32, evidence_bundle_hash=selected)['plan'] == plan
+    gateway._api.preview_governed_evidence_publication = original
+    with pytest.raises(GovernedWorkGatewayError) as error:
+        gateway.preview_evidence(binding_id='tcpsb_'+'6'*32, evidence_bundle_hash='sha256:'+'f'*64)
+    assert error.value.code == 'publication_evidence_invalid'
+    assert gateway._publication_selection is None
+    assert active_workspace_identity_scope() is None
+    assert G._load_local_provider(str(root)).get_public_key() == previous

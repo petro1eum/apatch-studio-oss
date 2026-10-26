@@ -51,6 +51,35 @@ def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
             raise UnsafeProjectionError("invalid private SDD judge setup") from exc
         contract.pop("judge_environment")
         contract["judge_setup_hash"] = digest
+    scheme = contract.get("acceptance_scheme")
+    if scheme is not None:
+        # Private validation reports the committed asset hash, never embeds
+        # its setup in the public projection. Global forbidden-key rules stay.
+        try:
+            from apatch.sdd_integrity import issue_capability, canonical_hash
+            issue_capability(value["contract"], value["task_envelope"], actor_id=value["actor_id"], role="implementation")
+            extended=isinstance(scheme,Mapping) and scheme.get('schema')=='trustchain.cowork.acceptance-plan.v2'
+            if (not isinstance(scheme, Mapping) or set(scheme) != {"schema", "tenant_id", "project_group_id", "work_item_id",
+                    "candidate_paths", "fixture_assets", "environment", "checks"} | ({'inputs'} if extended else set())
+                    or scheme.get("schema") not in {"trustchain.cowork.acceptance-plan.v1","trustchain.cowork.acceptance-plan.v2"}):
+                raise ValueError("private acceptance scheme shape is invalid")
+            if extended:
+                # Content guard only. Full native admission/install separately
+                # validates the REAL envelopes and current predecessor. Never
+                # expose setup, service URLs, source refs or credentials here.
+                from .exact_scheme_validation import validate_plan_delta
+                validate_plan_delta(scheme,scheme,None)
+                if {c['check_id'] for c in scheme['checks']}!={c['acceptance_id'] for c in contract['obligations']}:
+                    raise ValueError('private acceptance scheme check inventory changed')
+            pin = canonical_hash(scheme)
+            if (pin != contract["plan_hash"] or not contract.get("obligations")
+                    or any([a["sha256"] for a in c["judge_assets"] if a["path"] == "acceptance/work-plan.json"] != [pin]
+                           for c in contract["obligations"])):
+                raise ValueError("private acceptance scheme pin changed")
+        except (ImportError, KeyError, RuntimeError, ValueError, TypeError) as exc:
+            raise UnsafeProjectionError("invalid private acceptance scheme binding") from exc
+        contract.pop("acceptance_scheme")
+        contract["acceptance_scheme_hash"] = pin
     amendment = contract.get("judge_amendment")
     bootstrap = amendment.get("bootstrap") if isinstance(amendment, Mapping) else None
     if not isinstance(bootstrap, Mapping) or bootstrap.get("kind") != "pytest_explicit_conftest_bootstrap":

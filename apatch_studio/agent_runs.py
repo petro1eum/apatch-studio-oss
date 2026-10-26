@@ -119,7 +119,7 @@ class RunnerCatalog:
                 "--cd",
                 str(workspace),
                 "--approve-for-me",
-                *self._codex_mcp_overrides(),
+                *self._codex_mcp_overrides(workspace),
                 "-",
             ]
         return [
@@ -131,20 +131,22 @@ class RunnerCatalog:
             "--permission-mode",
             "auto",
             "--mcp-config",
-            json.dumps({"mcpServers": {"apatch": self.apatch_mcp_server()}}, sort_keys=True),
+            json.dumps({"mcpServers": {"apatch": self.apatch_mcp_server(workspace)}}, sort_keys=True),
             "--strict-mcp-config",
         ]
 
     @staticmethod
-    def apatch_mcp_server() -> dict[str, Any]:
+    def apatch_mcp_server(workspace: Path | None = None) -> dict[str, Any]:
         """The exact apatch MCP server every runner must use (REC-db629a7ee98f).
 
         Studio never relies on the consumer's ``.apatch/mcp.json`` or on a user's
         global runner configuration: those default to the compact 15-tool profile,
         which lacks the governed mutation tools a plan needs, and the failure is
         silent ("completed without one new reviewable plan"). The runner gets the
-        interpreter that runs Studio, the plain launcher bound to the workspace by
-        cwd, and the full professional catalog.
+        interpreter that runs Studio, the plain launcher explicitly bound to the
+        canonical workspace, and the full professional catalog. Introspection may
+        omit the workspace, but runner commands must always supply it: global
+        runner configuration can otherwise select a different MCP working folder.
         """
 
         env = {
@@ -156,6 +158,8 @@ class RunnerCatalog:
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
         }
+        if workspace is not None:
+            env["APATCH_MCP_BOUND"] = str(workspace.resolve())
         command = apatch_python_command("apatch.mcp.launcher")
         return {
             "command": command[0],
@@ -164,12 +168,12 @@ class RunnerCatalog:
         }
 
     @classmethod
-    def _codex_mcp_overrides(cls) -> list[str]:
-        server = cls.apatch_mcp_server()
-        env_table = ", ".join(f'{key}="{value}"' for key, value in server["env"].items())
-        return [
+    def _codex_mcp_overrides(cls, workspace: Path | None = None) -> list[str]:
+        server = cls.apatch_mcp_server(workspace)
+        env_table = ", ".join(f'{key}={json.dumps(value)}' for key, value in server["env"].items())
+        overrides = [
             "-c",
-            f'mcp_servers.apatch.command="{server["command"]}"',
+            "mcp_servers.apatch.command=" + json.dumps(server["command"]),
             "-c",
             "mcp_servers.apatch.args=" + json.dumps(server["args"]),
             "-c",
@@ -177,6 +181,9 @@ class RunnerCatalog:
             "-c",
             "mcp_servers.apatch.enabled=true",
         ]
+        if workspace is not None:
+            overrides.extend(["-c", "mcp_servers.apatch.cwd=" + json.dumps(str(workspace.resolve()))])
+        return overrides
 
     def planning_command(self, runner: RunnerId, workspace: Path) -> list[str]:
         """Use a latency-oriented profile only for contract preparation."""
@@ -434,6 +441,7 @@ def build_governed_prompt(
     planning_contract_run_id: str | None = None,
     planning_context: str | None = None,
     source_artifacts: list[dict[str, Any]] | None = None,
+    reviewer_note: str | None = None,
 ) -> str:
     """Build mode-specific instructions; user content is transported over stdin."""
 
@@ -451,6 +459,11 @@ def build_governed_prompt(
         "Treat the frozen verification contract and task envelope as the only authority for source work.",
         "Do not approve the contract or amendment as the implementation actor.",
     ]
+    if retry and reviewer_note:
+        common.extend([
+            "Reviewer feedback for this retry (context only; it does not amend the frozen contract or task authority):",
+            reviewer_note,
+        ])
     if retry:
         if request.mode == "new_change":
             common.extend(
@@ -505,7 +518,7 @@ def build_governed_prompt(
             'Preserve it in the signed native attestation and ContributionEvent; absent or changed artifacts make delivery unqualified.',
             'Native success is evidence only, never customer acceptance.',
         ])
-    if source_artifacts:
+    if source_artifacts and source_binding_context is None:
         exact_artifacts = json.dumps(source_artifacts, ensure_ascii=False, sort_keys=True)
         common.extend([
             "Before any mutation, preserve the following verified ProjectSourceBinding in the native session artifacts: " + exact_artifacts,
@@ -529,6 +542,13 @@ def build_governed_prompt(
                 "After that exact session is open, call apatch_execute_next only for the selected requirement.",
             ]
         )
+        if sdd_execution.contract.get('supersedes_hash') and source_binding_context is not None:
+            common.extend([
+                'This is a NEW, bilaterally agreed acceptance-scheme generation. A historical attested requirement is not proof for this generation.',
+                'If the source already implements the requirement, do NOT fabricate a source edit or retrofit old artifacts. Open a fresh verification-only session with the exact new contract, envelope, actor and ALL source_binding_artifacts_json above.',
+                'Run apatch_sdd_verify for that fresh session. It executes the unchanged frozen judges, their inventory, reversible RED/restored GREEN and content snapshot. Then apatch_verify_run with the exact configured requirement command, apatch_attest and apatch_session_end for the same fresh session. Never substitute spec_status or old coverage for these calls.',
+                'Use a dedicated lane for this fresh session. The prior attestation and its source binding stay immutable. Existing unrelated audit violations do not authorize cleanup: report them separately, preserve them and distinguish this run\'s captured scope delta. If a required verification or this run\'s own scope fails, report failure, never success.',
+            ])
 
     if request.mode == "new_change":
         template_spec_id: str | None = None
@@ -579,7 +599,7 @@ def build_governed_prompt(
             "3. Draft the RFP, SPEC, frozen test contract and preparation package completely before writing.",
             "If the capsule reports an existing frozen contract and this lineage has no SPEC yet, the following write steps do not apply: return a JSON array of exact {path, content} files for the original run owner-review surface. Do not call session_start, borrow an unrelated contract, or claim approval. The owner-reviewed initial preparation transaction creates the package without replacing the current frozen profile; implementation still needs its separate owner freeze.",
             "4. For a fresh lineage, open one contract-authoring session with apatch_session_start(intent=..., artifacts=['spec-bootstrap:<preallocated SPEC id>#R0', 'rfp:<preallocated RFP id>']) and create the complete RFP, complete SPEC, frozen test/fixture files and preparation package in one mutation batch of that session (apatch_generate_batch, apatch_simulate, apatch_apply_session), then verify, attest and end it.",
-            "5. If the exact-lineage SPEC scaffold already exists, use SPEC#R0 only when that requirement exists and owns the intended preparation files. Otherwise prepare an exact path/content draft repair for owner review in Studio under the original run. Do not invent R0, replace the lineage, claim owner approval, or disable strict ownership. After approval, continue with the same SPEC and its separate owner freeze.",
+            "5. If the exact-lineage SPEC scaffold already exists, use SPEC#R0 only when that requirement exists and owns the intended preparation files: call apatch_session_start once for the exact SPEC#R0, then call apatch_execute_next for that returned session with the complete ordered needles list and no finalize flag. Otherwise prepare an exact path/content draft repair for owner review in Studio under the original run. Do not invent R0, replace the lineage, claim owner approval, or disable strict ownership. After approval, continue with the same SPEC and its separate owner freeze.",
             "6. Repeat apatch_execute_next for the same session with no new needles while each response says continue=true. Only after continue=false, call it once with finalize=true and no needles. Do not place generate_batch, resume_session or rollback between these calls.",
             "Use at most 8 structured repository inspection command starts before the first contract write.",
             "After the first contract-authoring event, do not perform further repository inspection.",
@@ -852,6 +872,9 @@ def cleanup_planning_session(workspace: str | os.PathLike[str], run_id: str) -> 
 class AgentRunManager:
     """Bounded durable supervisor for allowlisted local coding agents."""
 
+    # Trusted headless adapters may narrow requests without changing browser schemas.
+    request_model = AgentRunRequest
+
     def __init__(
         self,
         workspace: str | os.PathLike[str],
@@ -870,6 +893,7 @@ class AgentRunManager:
         state_root: str | os.PathLike[str] | None = None,
         history_limit: int = 200,
         store: RunStore | None = None,
+        handoff_process_control=None,
     ):
         root = Path(workspace).expanduser().resolve()
         if not root.is_dir():
@@ -894,6 +918,7 @@ class AgentRunManager:
             lambda run_id: cleanup_planning_session(root, run_id)
         )
         self._popen = popen
+        self._handoff_process_control = handoff_process_control
         self._external_dispatch_guard = None
         self._review_collector = review_collector or WorkspaceReviewCollector(root).capture
         self._plan_handoff_collector = plan_handoff_collector or PlanHandoffCollector(root)
@@ -934,6 +959,9 @@ class AgentRunManager:
 
     def runners(self) -> list[dict[str, Any]]:
         return self._catalog.projection()
+
+    def _bind_execution_source_artifacts(self, argv, runner, artifacts):
+        return bind_execution_source_artifacts(argv, runner, artifacts)
 
     def _runner_command(self, request: AgentRunRequest) -> list[str]:
         if request.mode == "new_change":
@@ -1008,6 +1036,11 @@ class AgentRunManager:
                 retry_of=retry_of,
                 execution_context=execution_context,
                 sdd_execution=sdd_execution,
+                reviewer_note=(
+                    dict(self._record(retry_of).reviewer_note)
+                    if retry_of and self._record(retry_of).reviewer_note is not None
+                    else None
+                ),
             )
             self._append_timeline(record)
             self._runs[run_id] = record
@@ -1080,7 +1113,7 @@ class AgentRunManager:
     def retry(self, run_id: str) -> dict[str, Any]:
         with self._lock:
             record = self._record(run_id)
-            if record.status not in {"failed", "cancelled", "interrupted"}:
+            if not _can_retry_exact(record):
                 raise RunStateError("only failed, cancelled or interrupted runs can be retried")
             request = record.request
             execution_context = record.execution_context
@@ -1125,11 +1158,11 @@ class AgentRunManager:
         except KeyError as exc:
             raise RunNotFoundError(run_id) from exc
 
-    @staticmethod
-    def _restore_record(raw: dict[str, Any]) -> _RunRecord:
+    @classmethod
+    def _restore_record(cls, raw: dict[str, Any]) -> _RunRecord:
         record = _RunRecord(
             run_id=raw["run_id"],
-            request=AgentRunRequest.model_validate(raw["request"]),
+            request=cls.request_model.model_validate(raw["request"]),
             retry_of=raw.get("retry_of"),
             execution_context=(
                 ExecutionContext.model_validate(raw["execution_context"])
@@ -1285,7 +1318,7 @@ class AgentRunManager:
                 self._workspace, record.request, record.execution_context,
                 state_root=self._store.state_root, source_binding_context=source_binding_context,
             )
-            argv = bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
+            argv = self._bind_execution_source_artifacts(argv, record.request.runner, source_artifacts)
             prompt = build_governed_prompt(
                 record.request,
                 retry=record.retry_of is not None,
@@ -1296,25 +1329,37 @@ class AgentRunManager:
                 planning_contract_run_id=planning_contract_run_id,
                 planning_context=planning_context,
                 source_artifacts=source_artifacts,
+                reviewer_note=(
+                    record.reviewer_note["text"]
+                    if record.retry_of and record.reviewer_note is not None else None
+                ),
             )
             process_env = os.environ.copy()
             process_env.pop("APATCH_EXECUTION_SOURCE_ARTIFACTS", None)
             if record.request.mode == "new_change":
                 process_env["APATCH_LANE"] = planning_lane_for_run(record.run_id)
-            process = self._popen(
-                argv,
-                cwd=str(self._workspace),
-                env=process_env,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                bufsize=1,
-                shell=False,
-                start_new_session=True,
-            )
+            def spawn_process():
+                return self._popen(
+                    argv,
+                    cwd=str(self._workspace),
+                    env=process_env,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    bufsize=1,
+                    shell=False,
+                    start_new_session=True,
+                )
+            if self._handoff_process_control is not None and record.execution_context is not None:
+                context = record.execution_context
+                process = self._handoff_process_control.spawn(
+                    {name: getattr(context, name) for name in ('tenant_id','project_group_id','work_item_id')},
+                    record.run_id, spawn_process)
+            else:
+                process = spawn_process()
             with self._lock:
                 record.process = process
                 if record.cancel_requested:
@@ -1596,7 +1641,7 @@ class AgentRunManager:
             available_actions.append("review_plan")
         if record.status in {"queued", "running"}:
             available_actions.append("cancel")
-        if record.status in {"failed", "cancelled", "interrupted"}:
+        if _can_retry_exact(record):
             available_actions.append("fix_forward")
         if (
             record.request.governed_session_id
@@ -1662,7 +1707,7 @@ class AgentRunManager:
             "available_actions": available_actions,
             "persisted": self._journal_status != "error",
             "can_cancel": record.status in {"queued", "running"},
-            "can_retry": record.status in {"failed", "cancelled", "interrupted"},
+            "can_retry": _can_retry_exact(record),
             "failure": explain_failure(
                 record.outcome,
                 record.status,
@@ -1685,6 +1730,15 @@ class AgentRunManager:
         if forbidden.intersection(projection):
             raise AssertionError("unsafe run projection")
         return projection
+
+
+def _can_retry_exact(record: _RunRecord) -> bool:
+    if record.status in {'failed', 'cancelled', 'interrupted'}:
+        return True
+    return (record.status == 'succeeded' and record.request.mode == 'requirement'
+            and record.execution_context is not None and record.sdd_execution is not None
+            and bool(record.sdd_execution.contract.get('supersedes_hash'))
+            and record.contribution is None)
 
 
 def _can_retry(record: _RunRecord) -> bool:
