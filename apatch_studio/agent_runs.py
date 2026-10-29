@@ -517,6 +517,9 @@ def build_governed_prompt(
             'Pass that exact artifacts array to native apatch_session_start before any mutation.',
             'Preserve it in the signed native attestation and ContributionEvent; absent or changed artifacts make delivery unqualified.',
             'Native success is evidence only, never customer acceptance.',
+            'When attesting successful work, provide a concise public, factual completion summary as the apatch_attest message (or completion_summary when execute_next finalizes).',
+            'Do not include private material or claim customer acceptance. If no public summary is authorized, report that the review package is incomplete.',
+            'After the required verification, attestation and report-only audit, return the outcome. Studio separately validates and prepares delivery; do not search private evidence stores or publish on the owner\'s behalf.',
         ])
     if source_artifacts and source_binding_context is None:
         exact_artifacts = json.dumps(source_artifacts, ensure_ascii=False, sort_keys=True)

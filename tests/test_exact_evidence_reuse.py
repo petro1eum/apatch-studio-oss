@@ -74,6 +74,25 @@ def test_prebuilt_separate_times_are_reused_without_rewriting(retained):
     assert {name:path.read_bytes() for name,path in retained.paths.items()}==before
 
 
+def test_admitted_runner_model_is_preserved_when_building_evidence(retained):
+    from typing import Literal
+    from apatch_studio.operations import AgentRunRequest
+    class AdmittedRequest(AgentRunRequest):
+        runner: Literal['fixture_runner'] = 'fixture_runner'
+    retained.manager.run_request_model = AdmittedRequest
+    retained.manager._delivery_attempt = lambda row: {
+        'run_id': 'apr_'+'5'*32, 'status': 'succeeded', 'runner': 'fixture_runner'}
+    observed = []
+    def guard(request, *args, **kwargs):
+        observed.append((type(request), request.runner, kwargs['stage']))
+        return retained.current
+    retained.manager.guard_execution = guard
+    result = retained.manager.build_for_delivery('handoff', 'apr_'+'5'*32)
+    assert observed == [(AdmittedRequest, 'fixture_runner', 'build_evidence')]
+    assert result['attestation_count'] == 1 and result['contribution_event_count'] == 1
+    assert not result['customer_accepted']
+
+
 @pytest.mark.parametrize('document,field,value',[
     ('timesheet','claimed_active_seconds',999),('timesheet','subject_key_id','foreign'),
     ('evidence_bundle','change_hash','sha256:'+'f'*64),

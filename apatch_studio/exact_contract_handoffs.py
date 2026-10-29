@@ -143,6 +143,7 @@ class ExactContractConfirmation(BaseModel):
     confirmed: Literal[True]
     workspace_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     runner_id: Literal['codex','claude']
+    replace_waiting_runner: Literal['codex','claude'] | None = None
     requirement: str = Field(pattern=r'^SPEC-[A-Z0-9][A-Z0-9-]*#R[0-9]+$')
 
 
@@ -565,7 +566,7 @@ class ExactContractManager:
         external = ExecutionContext(**{name:proposal[name] for name in ('intent_id','tenant_id','project_group_id','work_item_id',
             'work_item_hash','authority_version','work_program_id','work_program_hash')},
             document_hash=G.document_hash(proposal),envelope_hash=G.envelope_hash(proposal))
-        current = self.guard_execution(AgentRunRequest(mode='requirement',runner=run['runner'],objective='Build selected evidence',
+        current = self.guard_execution(self.run_request_model(mode='requirement',runner=run['runner'],objective='Build selected evidence',
             spec_id=sdd.spec_id,requirement_id=sdd.requirement_id),external,sdd,stage='build_evidence')
         if current is None:
             denied('The exact source lineage is unavailable', 'exact_source_ack_required')
@@ -607,8 +608,20 @@ class ExactContractManager:
                     denied('Exact confirmation replay changed its choice','exact_contract_replay')
                 return copy.deepcopy(row)
             if row['status']=='awaiting_company':
-                if not for_delivery or row['requirement']!=confirmation.requirement or row.get('company_runner')!=confirmation.runner_id:
+                if not for_delivery or row['requirement']!=confirmation.requirement:
                     denied('Company continuation changed its admitted choice','exact_contract_replay')
+                if row.get('company_runner')!=confirmation.runner_id:
+                    # A separate optimistic confirmation may change the executor
+                    # only before any native run exists. Scope, receipts and the
+                    # Company admission are retained and rechecked below.
+                    previous=getattr(confirmation,'replace_waiting_runner',None)
+                    if (previous is None or previous!=row.get('company_runner') or row.get('run_id') is not None
+                            or any((run.get('execution_context') or {}).get('intent_id')==row['intent_id']
+                                   for run in self.run_manager.list())):
+                        denied('Company continuation changed its admitted choice','exact_contract_replay')
+                    row.setdefault('runner_reselections',[]).append({'previous':previous,'selected':confirmation.runner_id,
+                        'confirmed_at':self.clock().isoformat(),'before_native_dispatch':True})
+                    row['company_runner']=confirmation.runner_id
             elif row['status']!='pending':
                 denied('Exact dispatch is already inflight or requires review','exact_contract_replay')
             row['status'],row['requirement']='consuming',confirmation.requirement

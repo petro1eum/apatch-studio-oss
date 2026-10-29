@@ -46,6 +46,20 @@ def admission(root):
             'qualified_until':(datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}}
 
 
+def test_exact_workspace_mount_does_not_allow_another_container_path(tmp_path):
+    a=admission(tmp_path);a['container_workspace']=a['workspace']
+    k=Kernel(a);e=Engine(a,k)
+    e.row['Config']['WorkingDir']=a['workspace']
+    e.row['Mounts'][0]['Destination']=a['workspace']
+    state=tmp_path/'observer';state.mkdir(mode=0o700)
+    c=q.ContainerControl(a,state,e,k,uid=os.getuid())
+    assert c._inspect()['Config']['WorkingDir']==a['workspace']
+    e.row['Mounts'][0]['Destination']='/another-workspace'
+    with pytest.raises(q.StopUnavailable):c._inspect()
+    a['container_workspace']='/another-workspace'
+    with pytest.raises(q.StopUnavailable):q.validate_admission(a)
+
+
 class Kernel:
     def __init__(self,a):
         self.a=a;self.inode=123;self.processes={};self.populated=False;self.nested_populated=False;self.boot=BOOT

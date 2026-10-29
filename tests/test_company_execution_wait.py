@@ -71,3 +71,28 @@ def test_transport_failure_retains_wait_and_no_execution(waiting):
     with pytest.raises(RuntimeError):manager._confirm(row['handoff_id'],confirmation,for_delivery=True)
     assert row['status']=='awaiting_company' and row['run_id'] is None
     manager.run_manager.start.assert_not_called()
+
+
+def test_explicit_reselection_before_dispatch_retains_scope_and_company_gate(waiting):
+    manager,row,gate,confirmation=waiting
+    before=copy.deepcopy(row['ack'])
+    confirmation.runner_id='claude';confirmation.replace_waiting_runner='codex'
+    result=manager._confirm(row['handoff_id'],confirmation,for_delivery=True)
+    assert result['status']=='awaiting_company' and row['ack']==before
+    assert row['company_runner']=='claude' and row['runner_reselections'][0]['previous']=='codex'
+    manager.run_manager.start.assert_not_called();assert gate.call_count==1
+    gate.return_value={'required':True,'admitted':True,'execution_permitted':True}
+    manager._confirm(row['handoff_id'],confirmation,for_delivery=True)
+    assert manager.run_manager.start.call_count==1 and len(row['runner_reselections'])==1
+
+
+@pytest.mark.parametrize('conflict',['stale','allocated','uncertain'])
+def test_reselection_cannot_borrow_or_replace_a_native_run(waiting,conflict):
+    manager,row,gate,confirmation=waiting
+    confirmation.runner_id='claude';confirmation.replace_waiting_runner='codex'
+    if conflict=='stale':confirmation.replace_waiting_runner='claude'
+    if conflict=='allocated':row['run_id']='apr_'+'d'*32
+    if conflict=='uncertain':manager.run_manager.list=lambda:[{'execution_context':{'intent_id':row['intent_id']}}]
+    with pytest.raises(ExecutionIntentError):manager._confirm(row['handoff_id'],confirmation,for_delivery=True)
+    assert row['company_runner']=='codex' and 'runner_reselections' not in row
+    manager.run_manager.start.assert_not_called();gate.assert_not_called()
