@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import inspect
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -330,10 +331,17 @@ class APatchGovernedWorkGateway:
             self._publication_selection = None
             try:
                 context, _provider = self._publication_context()
-                result = self._api.preview_governed_evidence_publication(
-                    str(self.workspace), binding_id=binding_id,
-                    **({"evidence_bundle_hash": evidence_bundle_hash} if evidence_bundle_hash is not None else {}),
-                )
+                preview = self._api.preview_governed_evidence_publication
+                params = inspect.signature(preview).parameters
+                accepts_exact = ('evidence_bundle_hash' in params or
+                    any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values()))
+                # Older supported Core selects exactly one signed bundle per
+                # source binding. It has no hash selector; the returned plan
+                # must still equal the requested hash below, before consent.
+                if evidence_bundle_hash is not None and not accepts_exact and set(params) != {'target_dir', 'binding_id'}:
+                    raise ValueError('unsupported evidence preview ABI')
+                result = preview(str(self.workspace), binding_id=binding_id,
+                    **({'evidence_bundle_hash': evidence_bundle_hash} if evidence_bundle_hash is not None and accepts_exact else {}))
                 if result.get("ok") is not True:
                     raise GovernedWorkGatewayError(
                         "The selected signed evidence is unavailable or invalid",

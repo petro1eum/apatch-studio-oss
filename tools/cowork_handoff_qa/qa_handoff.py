@@ -58,11 +58,15 @@ def load_json(path, *, uid=0):
 
 
 def validate_admission(value):
+    if isinstance(value,dict) and value.get('schema')=='trustchain.cowork.systemd-handoff-host-admission.v1':
+        from qa_systemd_handoff import validate
+        return validate(value)
     a = copy.deepcopy(value)
     keys = {'schema', 'scope', 'observer', 'container_id', 'container_created', 'image', 'argv',
             'workspace', 'container_env_sha256', 'cgroup_root', 'cgroup_parent', 'host_boot_id',
             'memory_bytes', 'pids_limit'}
-    require(isinstance(a, dict) and set(a) == keys and a['schema'] == SCHEMA, 'Closed host admission required')
+    require(isinstance(a, dict) and set(a) in (keys, keys | {'container_workspace'})
+            and a['schema'] == SCHEMA, 'Closed host admission required')
     scope_key(a['scope'])
     o = a['observer']
     require(isinstance(o, dict) and set(o) == {'schema','observer_id','program_sha256','host_id','workspace_id',
@@ -87,6 +91,8 @@ def validate_admission(value):
         and all(type(x) is str and x and '\0' not in x for x in a['argv']), 'Exact process arguments required')
     for key in ('workspace','cgroup_root'):
         p = Path(a[key]); require(p.is_absolute() and '..' not in p.parts, 'Noncanonical admitted path')
+    require(a.get('container_workspace', '/workspace') in ('/workspace', a['workspace']),
+            'Only the exact admitted workspace or fixed mount is allowed')
     # The root is a dedicated persistent parent, not Docker's removable leaf.
     require(re.fullmatch(r'tc-cowork-handoff-qa-[a-f0-9]{32}(?:\.slice)?', Path(a['cgroup_root']).name), 'Dedicated QA cgroup parent required')
     require(type(a['cgroup_parent']) is str and a['cgroup_parent'] and '\0' not in a['cgroup_parent'], 'Exact Docker cgroup parent required')
@@ -178,6 +184,9 @@ class ContainerControl:
         self._ticket = threading.local()
         self._process = None
 
+    @property
+    def execution_id(self):return self.admission['container_id']
+
     def _current(self):
         validate_admission(self.admission)
         require(self.kernel.boot_id() == self.admission['host_boot_id'], 'Host restarted; qualification is unavailable')
@@ -207,12 +216,13 @@ class ContainerControl:
             and h.get('PidMode','') in {'','private'} and h.get('IpcMode') == 'private'
             and h.get('CgroupnsMode') == 'private' and not h.get('DeviceCgroupRules')
             and h['Memory'] == a['memory_bytes'] and h['PidsLimit'] == a['pids_limit'], 'Containment posture changed')
-        require(c['User'] == '1000:1000' and c['WorkingDir'] == '/workspace'
+        target = a.get('container_workspace', '/workspace')
+        require(c['User'] == '1000:1000' and c['WorkingDir'] == target
             and (c.get('Entrypoint') or [])+(c.get('Cmd') or []) == a['argv']
             and digest(c.get('Env') or []) == a['container_env_sha256'], 'Pinned runner configuration changed')
         mounts = row['Mounts']
         require(len(mounts) == 1 and mounts[0]['Type'] == 'bind' and mounts[0]['Source'] == a['workspace']
-            and mounts[0]['Destination'] == '/workspace' and mounts[0]['RW'] is True
+            and mounts[0]['Destination'] == target and mounts[0]['RW'] is True
             and mounts[0].get('Propagation') == 'rprivate', 'Only the exact QA workspace may be mounted')
         require((c.get('Labels') or {}).get('tc.handoff.run_id') == a['observer']['expected_run_ids'][0]
             and (c.get('Labels') or {}).get('tc.handoff.scope_hash') == digest(a['scope']), 'Container run labels changed')
@@ -226,7 +236,7 @@ class ContainerControl:
         require(list(argv) == self.admission['argv'] and kw.get('cwd') == self.admission['workspace']
             and kw.get('shell',False) is False and kw.get('start_new_session') is True, 'Runner launch differs from admission')
         self._ticket.used = True
-        self._process = self.engine.attach_start(self.admission['container_id'])
+        self._process = self.engine.attach_start(self.execution_id)
         return self._process
 
     def spawn(self, scope, run_id, start):
@@ -289,7 +299,7 @@ class ContainerControl:
             state['fence'] = copy.deepcopy(fence); directory.write_json('contained-run.json',state)
             row, tree = self._closed(state,record_more=True); directory.write_json('contained-run.json',state)
             if row['State']['Running']:
-                self.engine.stop(self.admission['container_id'],timeout)
+                self.engine.stop(self.execution_id,timeout)
             if self._process is not None:
                 self._process.wait(timeout=max(1,timeout))
             end = time.monotonic()+timeout

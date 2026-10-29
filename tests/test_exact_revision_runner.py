@@ -41,3 +41,6 @@ def test_revision_prompt_uses_all_exact_anchors_and_fresh_native_verification():
     assert 'fresh verification-only session' in text and 'Run apatch_sdd_verify' in text
     assert 'do NOT fabricate a source edit' in text and 'dedicated lane' in text
     assert 'preserve the following verified ProjectSourceBinding' not in text
+    assert 'concise public, factual completion summary' in text
+    assert 'Do not include private material or claim customer acceptance' in text
+    assert 'do not search private evidence stores or publish' in text

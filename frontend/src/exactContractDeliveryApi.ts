@@ -55,7 +55,10 @@ export async function previewExactArtifacts(handoffId: string, runId: string, si
       || v.customer_accepted !== false || !Array.isArray(v.files) || !v.files.length || v.files.length > 256) invalid();
   text(v.package_hash, HASH); text(v.project_group_id, /^tcpg_[a-f0-9]{32}$/);
   const origin = new URL(v.platform_origin);
-  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.search || origin.hash) invalid();
+  const loopback = origin.hostname === 'localhost' || origin.hostname === '[::1]'
+    || /^127(?:\.\d{1,3}){3}$/.test(origin.hostname);
+  if ((origin.protocol !== 'https:' && !(origin.protocol === 'http:' && loopback))
+      || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) invalid();
   const files: Array<{path: string; sha256: string}> = v.files.map((value: unknown) => { const f = object(value); exactKeys(f, ['path', 'sha256']);
     if (typeof f.path !== 'string' || !f.path || f.path.length > 256 || f.path.split('/').some((p: string) => !p || p.startsWith('.'))
         || f.path.includes('\\') || /[\x00-\x1f]/.test(f.path)) invalid();

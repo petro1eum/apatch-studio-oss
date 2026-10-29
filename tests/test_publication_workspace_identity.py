@@ -96,3 +96,31 @@ def test_preview_pins_requested_hash_and_rejects_a_different_native_selection(ca
     assert gateway._publication_selection is None
     assert active_workspace_identity_scope() is None
     assert G._load_local_provider(str(root)).get_public_key() == previous
+
+
+def test_legacy_unique_bundle_preview_still_requires_the_exact_requested_hash(case):
+    root, gateway, calls, plan, previous = case
+    original = gateway._api.preview_governed_evidence_publication
+    def legacy(target_dir, *, binding_id):
+        return original(target_dir, binding_id=binding_id)
+    gateway._api.preview_governed_evidence_publication = legacy
+    selected = plan['evidence_bundle_ref']['bundle_hash']
+    assert gateway.preview_evidence(binding_id='tcpsb_'+'6'*32, evidence_bundle_hash=selected)['plan'] == plan
+    with pytest.raises(GovernedWorkGatewayError) as error:
+        gateway.preview_evidence(binding_id='tcpsb_'+'6'*32, evidence_bundle_hash='sha256:'+'f'*64)
+    assert error.value.code == 'publication_evidence_invalid'
+    assert gateway._publication_selection is None
+    assert active_workspace_identity_scope() is None
+    assert G._load_local_provider(str(root)).get_public_key() == previous
+
+
+def test_unknown_preview_abi_fails_before_selecting_a_bundle(case):
+    _, gateway, calls, plan, _ = case
+    def unsupported(target_dir, *, some_other_selection):
+        raise AssertionError('Unknown native ABI must not be called')
+    gateway._api.preview_governed_evidence_publication = unsupported
+    with pytest.raises(GovernedWorkGatewayError) as error:
+        gateway.preview_evidence(binding_id='tcpsb_'+'6'*32,
+                                 evidence_bundle_hash=plan['evidence_bundle_ref']['bundle_hash'])
+    assert error.value.code == 'publication_evidence_invalid'
+    assert gateway._publication_selection is None
