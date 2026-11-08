@@ -51,6 +51,37 @@ def private_sdd_projection(value: Mapping[str, Any]) -> dict[str, Any]:
             raise UnsafeProjectionError("invalid private SDD judge setup") from exc
         contract.pop("judge_environment")
         contract["judge_setup_hash"] = digest
+    envelope = view.get("task_envelope")
+    setup = envelope.get("verifier_environment") if isinstance(envelope, Mapping) else None
+    if setup is not None:
+        # This is a private, sealed asset reference, not a public environment
+        # projection. Keep execution documents byte-for-byte; the guard sees
+        # only a digest after validating both the seal and the selected checks.
+        try:
+            from pathlib import PurePosixPath
+            import re
+            from apatch.sdd_integrity import issue_capability, canonical_hash
+
+            issue_capability(value["contract"], value["task_envelope"],
+                             actor_id=value["actor_id"], role="implementation")
+            if not isinstance(setup, Mapping) or set(setup) != {"path", "sha256"}:
+                raise ValueError("private verifier setup shape is invalid")
+            name, pin = setup["path"], setup["sha256"]
+            if (not isinstance(name, str) or not name or "\\" in name
+                    or PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts
+                    or str(PurePosixPath(name)) != name or name == "."
+                    or not isinstance(pin, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", pin)):
+                raise ValueError("private verifier setup reference is invalid")
+            selected = set(envelope["checks"])
+            if not any(setup == asset for check in contract["obligations"]
+                       if check["acceptance_id"] in selected
+                       for asset in check.get("judge_assets", [])):
+                raise ValueError("private verifier setup is not a selected frozen asset")
+            digest = canonical_hash(setup)
+        except (ImportError, KeyError, RuntimeError, ValueError, TypeError) as exc:
+            raise UnsafeProjectionError("invalid private verifier setup binding") from exc
+        envelope.pop("verifier_environment")
+        envelope["verifier_setup_hash"] = digest
     scheme = contract.get("acceptance_scheme")
     if scheme is not None:
         # Private validation reports the committed asset hash, never embeds
