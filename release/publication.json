@@ -1,39 +1,44 @@
 {
   "schema": "apatch.studio.oss-publication.v1",
-  "version": "0.1.6",
-  "source_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
-  "public_candidate_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
+  "version": "0.1.7",
+  "source_commit": "c8cc608aa4b69b6ca391b230a5c555924c435e82",
+  "public_candidate_commit": "c8cc608aa4b69b6ca391b230a5c555924c435e82",
   "artifacts": [
     {
-      "filename": "apatch_studio-0.1.6-py3-none-any.whl",
-      "sha256": "3ff19867c1284ef319c067e98ef865fc4898daa52eb2fe8a5ef2e3a513a50e9a"
+      "filename": "apatch_studio-0.1.7-py3-none-any.whl",
+      "sha256": "8defbb22503ffecbb360192c9b93545ef174329957a4caf26763bdf955e85911"
     },
     {
-      "filename": "apatch_studio-0.1.6.tar.gz",
-      "sha256": "6467e8976a4f77b6e38d7a02df14f351104dc65ba1b7413020328e93d91fbbf8"
+      "filename": "apatch_studio-0.1.7.tar.gz",
+      "sha256": "b4f3dcb8701a8bd4b3a616ff53715e6b4f0b2312460f7b9de89981e3867b39a3"
     }
   ],
   "verification": [
     {
-      "command": "setuptools.build_meta.build_wheel and build_sdist",
-      "result": "passed: exact native combined source; both distribution builds completed"
+      "command": "npm --prefix frontend ci; npm --prefix frontend run build",
+      "result": "passed: locked frontend installed and compiled in a clean detached source checkout"
+    },
+    {
+      "command": "python -m build",
+      "result": "passed: Python 3.12 built the source distribution and then the universal wheel from that distribution"
     },
     {
       "command": "python -m twine check --strict",
-      "result": "passed: actual final wheel and sdist metadata checks"
+      "result": "passed: the exact two distributions passed strict package metadata validation"
     },
     {
-      "command": "python scripts/qualify_oss.py --profile standalone",
-      "result": "passed: fresh standalone canonical run bound to these exact installed Core archives and native custody; 2521 passed, one declared optional skip, 97 specifications and 538 commands; 96 conformant, one declared external unproven"
+      "command": "PIP_FIND_LINKS=<paired-core-wheel-directory> python -m pytest -q --tb=short",
+      "result": "passed: 1139 tests on macOS arm64 / Python 3.12; includes native signed receipts, refusal before launch and the historical installed Studio 0.1.6 / Core 0.8.51 judge. Candidate wheel installs inside this development suite could use the local Core wheel"
     },
     {
-      "command": "python -I -B -m pytest tests --import-mode=importlib",
-      "result": "passed: historical 802-case Studio evidence retained for unchanged payload; approved A/B successors have actual signed frozen SDD and accepted original41 coverage; current R10 verifies exact newly installed Studio runtime and declared two-route API; R9 current record is checked separately"
-    },
-    {
-      "command": "installed Core 0.8.51 and Studio 0.1.6 cross-package import/API verification",
-      "result": "passed: fresh isolated public qualification preflight with Core 0.8.51 and Studio 0.1.6 installed from these exact wheels; historical 802 Studio cases cover unchanged payload; approved source delta is independently native-qualified and current R10 executes against the exact newly installed Studio runtime; no fresh 802-case pair rerun is claimed"
+      "command": "python -m pip check; python -I tools/check_installed_studio.py",
+      "result": "passed: exact Studio and local Core wheels in isolated site-packages; loopback OSS health, HTML, JS and CSS served. A separate Chromium interaction opened the executable plan, expanded a requirement, followed its proposal, and opened the library without console errors"
     }
   ],
-  "note": "Archive and installed evidence only. No PyPI publication, live Cowork cutover, x86 qualification or new canary/rollback result is asserted. R9 finalization remains a separate native session."
+  "staging_core": {
+    "version": "0.8.55",
+    "source_commit": "f6846aceb8a943c9e26b52e76e409375d100e007",
+    "wheel_sha256": "46b96883ee0bed2167c883a61e4386cea8cc43f1b4a512e85663b6b240f483df"
+  },
+  "note": "Archive qualification only. A fresh installation of this wheel using only the public PyPI index could not resolve apatch>=0.8.54. No Studio publication, Core release approval or production deployment is asserted."
 }
