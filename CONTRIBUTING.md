@@ -18,11 +18,17 @@ changes that preserve its local-first security boundary.
 python3 -m venv .venv
 npm --prefix frontend ci
 npm --prefix frontend run build
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pip install -r requirements/source.txt -e ".[dev]"
+.venv/bin/python -m pip check
 .venv/bin/pytest -q
 .venv/bin/python -m build .
 .venv/bin/python -m twine check dist/*
 ```
+
+The source install uses a pinned revision of the public Core repository. Update
+that pin when changing the SDK contract. The publish workflow deliberately
+resolves the wheel's declared dependencies from the package index, without the
+development pin: release the compatible Core to PyPI before publishing Studio.
 
 The browser API must remain loopback-only and fixed-purpose. Please do not add a
 generic shell, filesystem, Git or MCP relay.

@@ -6,11 +6,14 @@ run, inspect, recover and deliver that work.
 
 ## Install
 
-You need Python 3.11 or newer, a local Git repository, and at least one locally
-installed agent CLI: Codex or Claude Code.
+You need Python 3.11 or newer and a local Git repository. To run an agent,
+install and authenticate Codex or Claude Code. You can open Studio before that.
+On macOS or Linux, install the published Studio and its matching Core together:
 
 ```bash
-python3 -m pip install apatch-studio
+python3 -m venv ~/.venvs/apatch-studio
+source ~/.venvs/apatch-studio/bin/activate
+python -m pip install apatch-studio
 apatch-studio serve --workspace /path/to/your/git/repository
 ```
 
@@ -63,12 +66,19 @@ authorized, content-safe evidence is eligible to leave the machine.
 
 ## Develop from source
 
+Start in a clean Studio checkout with Git and Node.js available. Keep this
+environment separate from any published installation. Source development uses
+the exact public Core revision in `requirements/source.txt`, even when the
+corresponding Core release is not on PyPI yet.
+
 ```bash
 python3 -m venv .venv
 npm --prefix frontend ci
 npm --prefix frontend run build
-.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pip install -r requirements/source.txt -e ".[dev]"
+.venv/bin/python -m pip check
 .venv/bin/pytest -q
+.venv/bin/apatch-studio serve --workspace /path/to/your/git/repository
 ```
 
 Node is needed only to build the UI from source. Published wheels contain the web
@@ -77,6 +87,11 @@ client.
 ## Troubleshooting
 
 - **No agent is available:** install/authenticate Codex or Claude Code and restart.
+- **Core cannot be imported or pip cannot find the required version:** check
+  `python -m pip show apatch apatch-studio` in the environment you launch.
+  For the published edition use the Install steps above; for a checkout use
+  its source installation steps. Neither requires changing the system Python
+  or deleting your workspace.
 - **Runtime needs attention:** open **Admin → Runtime** and follow the reported
   update or cleanup step.
 - **A plan stops:** open the run card; Studio records the bounded failure and offers

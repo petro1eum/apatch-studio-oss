@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import importlib
 import re
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 try:  # pragma: no cover - exercised through the real runtime
     from apatch import __version__ as apatch_version
-except Exception:  # pragma: no cover - apatch missing entirely
-    apatch_version = "0.0.0"
+except ImportError:  # pragma: no cover - apatch missing entirely
+    apatch_version = "not importable"
 
 REQUIREMENTS_SCHEMA = "apatch.studio.runtime-requirements.v1"
-REQUIRED_APATCH_VERSION = "0.8.45"
+REQUIRED_APATCH_VERSION = "0.8.54"
 REQUIRED_FIXES: tuple[tuple[str, str, str, str], ...] = (
     (
         "session_binding",
@@ -25,6 +26,12 @@ REQUIRED_FIXES: tuple[tuple[str, str, str, str], ...] = (
         "apatch.spec_ownership",
         "_bootstrap_authorization",
         "A fresh plan may create its own new specification",
+    ),
+    (
+        "existing_signer",
+        "apatch.strict_existing_signer",
+        "ExistingSignerBinding",
+        "An approved task can use the workspace's existing signing identity",
     ),
 )
 
@@ -46,7 +53,7 @@ def probe_runtime_requirements(
     for fix_id, module_name, symbol, label in REQUIRED_FIXES:
         try:
             present = hasattr(importer(module_name), symbol)
-        except Exception:
+        except Exception:  # noqa: BLE001 - Admin must report even a failed module initializer.
             present = False
         fixes.append({"id": fix_id, "label": label, "present": present})
     missing = [fix["label"] for fix in fixes if not fix["present"]]
@@ -54,19 +61,19 @@ def probe_runtime_requirements(
     ok = not missing
     if ok and version_ok:
         headline = f"APatch {installed} meets Studio's requirements"
-        explanation = "Every fix the plan loop depends on is present."
+        explanation = "All checked runtime capabilities are present."
         next_step = "Nothing to do."
     elif ok:
         headline = f"APatch {installed} carries the required fixes"
         explanation = (
-            f"Studio expects {REQUIRED_APATCH_VERSION} or newer, but every fix the plan loop "
-            "depends on is present, so this build works."
+            f"Studio expects {REQUIRED_APATCH_VERSION} or newer, but this build "
+            "already provides all checked capabilities."
         )
         next_step = "Nothing to do."
     else:
         count = len(missing)
         headline = f"APatch {installed} lacks {count} required fix{'es' if count != 1 else ''}"
-        explanation = "Missing: " + "; ".join(missing) + ". Preparing a plan fails until the runtime carries them."
+        explanation = "Missing: " + "; ".join(missing) + ". Update the runtime before using these features."
         next_step = f"Update APatch to {REQUIRED_APATCH_VERSION} or newer, then restart Studio."
     return {
         "schema": REQUIREMENTS_SCHEMA,

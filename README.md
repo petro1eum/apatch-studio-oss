@@ -24,25 +24,23 @@ on the user's machine unless the user separately publishes them through Git.
 
 ## Install
 
-APatch Studio OSS requires Python 3.11 or newer.
+For normal use, install the published Studio in its own Python 3.11+ environment.
+It installs the compatible public APatch Core automatically; no separate Core
+checkout, account or Node.js installation is needed.
 
 ```bash
-python3 -m pip install apatch-studio
+python3 -m venv ~/.venvs/apatch-studio
+source ~/.venvs/apatch-studio/bin/activate
+python -m pip install apatch-studio
 apatch-studio serve --workspace /path/to/your/git/repository
 ```
 
-Studio opens a loopback-only browser interface. Consumer installation does not need
-Node.js because the wheel contains the built web client.
-
-For development:
-
-```bash
-python3 -m venv .venv
-npm --prefix frontend ci
-npm --prefix frontend run build
-.venv/bin/pip install -e ".[dev]"
-.venv/bin/pytest -q
-```
+Studio opens a loopback-only browser interface. Reactivate the same environment
+next time, or run `~/.venvs/apatch-studio/bin/apatch-studio` directly. The
+[Studio package](https://pypi.org/project/apatch-studio/) and
+[Core package](https://pypi.org/project/apatch/) list the published versions.
+The development branch can be newer. To run or test a checkout, use the
+[source installation instructions](https://github.com/petro1eum/apatch-studio-oss/blob/main/docs/GETTING-STARTED.md#develop-from-source).
 
 ## What is included
 

@@ -1,0 +1,3 @@
+# Public Core revision tested with this Studio checkout. For source development
+# only; wheels and the publication workflow resolve dependencies from PyPI.
+apatch[mcp] @ git+https://github.com/petro1eum/apatch-oss.git@f6846aceb8a943c9e26b52e76e409375d100e007

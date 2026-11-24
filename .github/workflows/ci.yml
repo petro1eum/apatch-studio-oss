@@ -8,6 +8,21 @@ permissions:
   contents: read
 
 jobs:
+  published-oss:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install as a new user and open the published Studio
+        working-directory: ${{ runner.temp }}
+        run: |
+          python -m venv oss-install
+          oss-install/bin/python -m pip install --index-url https://pypi.org/simple --only-binary=apatch,apatch-studio apatch-studio
+          oss-install/bin/python -m pip check
+          oss-install/bin/python -I "$GITHUB_WORKSPACE/tools/check_installed_studio.py"
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -16,6 +31,8 @@ jobs:
         python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -27,7 +44,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend run build
-      - run: python -m pip install -e ".[dev]"
+      - run: python -m pip install -r requirements/source.txt -e ".[dev]"
+      - run: python -m pip check
       - run: python -m pytest -q
       - run: python -m build .
       - run: python -m twine check dist/*

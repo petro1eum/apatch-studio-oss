@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import re
 import tomllib
+from pathlib import Path
 
 from apatch_studio.app import create_app
 
@@ -18,15 +18,17 @@ def test_product_boundary():
 
     assert project["license"] == "MIT"
     assert project["description"] == "Local contract-driven workspace for governing AI-agent work with APatch and TrustChain Cowork"
-    expected_sdk = "apatch[mcp]>=0.8.51" if project["version"] == "0.1.6" else "apatch[mcp]>=0.8.50" if project["version"] == "0.1.5" else "apatch[mcp]>=0.8.45"
-    assert expected_sdk in project["dependencies"]
+    assert "apatch[mcp]>=0.8.54" in project["dependencies"]
     assert "apatch studio oss" in readme
     assert "organization control plane" in readme
     assert "trustchain cowork" in readme
     assert "source code, diffs, prompts, credentials and private keys stay" in readme
-    assert readme.index("npm --prefix frontend run build") < readme.index('.venv/bin/pip install -e ".[dev]"')
     guide = (ROOT / "docs/GETTING-STARTED.md").read_text(encoding="utf-8")
     assert "APatch Studio OSS" in guide
+    assert "docs/getting-started.md#develop-from-source" in readme
+    assert guide.index("npm --prefix frontend run build") < guide.index(
+        'pip install -r requirements/source.txt -e ".[dev]"'
+    )
     assert "clean, independently installable OSS client" in rfp
     assert "mit license" in license_text
     assert not (ROOT / "apatch").exists()

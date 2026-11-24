@@ -11,7 +11,6 @@ from pathlib import Path
 
 import uvicorn
 
-from apatch_studio.app import create_app
 from apatch_studio.edition import StudioEdition
 from apatch_studio.endpoint_enrollment import (
     adopt_identity,
@@ -21,10 +20,13 @@ from apatch_studio.endpoint_enrollment import (
     name_this_machine,
 )
 from apatch_studio.endpoint_identity import endpoint_identity_status
-from apatch_studio.execution_intents import ExecutionIntentTrust, ExecutionIntentError
-from apatch_studio.exact_contract_handoffs import ExactContractTrust
 from apatch_studio.run_store import default_state_root
-from apatch_studio.runtime_requirements import probe_runtime_requirements, runtime_banner_lines
+from apatch_studio.runtime_requirements import (
+    REQUIRED_APATCH_VERSION,
+    apatch_version,
+    probe_runtime_requirements,
+    runtime_banner_lines,
+)
 from apatch_studio.security import is_loopback_host
 
 
@@ -87,6 +89,20 @@ def serve(args: argparse.Namespace) -> int:
         family, address, display_host = _loopback_socket_config(args.host, args.port)
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
+    try:
+        from apatch_studio.app import create_app
+        from apatch_studio.exact_contract_handoffs import ExactContractTrust
+        from apatch_studio.execution_intents import ExecutionIntentError, ExecutionIntentTrust
+    except ImportError as exc:
+        if exc.name != "apatch" and not (exc.name or "").startswith("apatch."):
+            raise
+        raise SystemExit(
+            f"Studio cannot start with this APatch Core ({apatch_version}); "
+            f"it needs the public Core {REQUIRED_APATCH_VERSION}+ API ({exc.name}).\n"
+            "For a release, install apatch-studio in a fresh virtual environment. "
+            "For a source checkout, run this from its root in its own environment:\n"
+            '  python -m pip install -r requirements/source.txt -e ".[dev]"'
+        ) from exc
     workspace = Path(args.workspace).expanduser().resolve()
     apply_stored_identity(default_state_root())
     try:
