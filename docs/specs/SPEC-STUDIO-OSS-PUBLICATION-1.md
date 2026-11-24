@@ -114,6 +114,13 @@ current bytes. The primary file is `apatch_studio/app.py`; SDK dependency is
 remain unchanged. This R10 binding is release preparation, not attestation or
 publication proof; R9 still requires actual signed source and exact artifacts.
 
+For 0.1.7 the previous public version is 0.1.6. The candidate binds the Inbox
+gateway and the complete tracked package and frontend inputs to one public Git
+ancestor. The previous candidate and qualification records stay byte-exact in
+`release/history/0.1.6/`. Passing with a locally supplied Core is staging
+evidence only. Release requires an index-only install with no local wheel or
+extra package source; publish the exact wheel and sdist identified by R9.
+
 (verify: python3 -m pytest -q tests/oss_publication/test_candidate_version.py)
 
 ## Traceability

@@ -115,21 +115,30 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         ("/api/v1/contract-intake/{spec_id}", "POST"),
         ("/api/v1/contract-intake/{spec_id}/approve", "POST"),
     }
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    if project["version"] == "0.1.6":
-        expected_routes |= {
-            ("/api/v1/specs/{spec_id}/document-publication", "GET"),
-            ("/api/v1/specs/{spec_id}/document-publication", "POST"),
-            ("/api/v1/specs/{spec_id}/document-publication/approve", "POST"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff", "GET"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff", "POST"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff/approve", "POST"),
-        }
-    if project["version"] == "0.1.6":
-        expected_routes |= {
-            ("/api/v1/contract-intake/{spec_id}/recovery", "GET"),
-            ("/api/v1/contract-intake/{spec_id}/recovery/cancel", "POST"),
-        }
+    expected_routes |= {
+        ("/api/v1/specs/{spec_id}/document-publication", "GET"),
+        ("/api/v1/specs/{spec_id}/document-publication", "POST"),
+        ("/api/v1/specs/{spec_id}/document-publication/approve", "POST"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff", "GET"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff", "POST"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff/approve", "POST"),
+        ("/api/v1/contract-intake/{spec_id}/recovery", "GET"),
+        ("/api/v1/contract-intake/{spec_id}/recovery/cancel", "POST"),
+        ("/api/v1/governed-work/evidence/preview", "POST"),
+        ("/api/v1/governed-work/evidence/publish", "POST"),
+        ("/api/v1/exact-contract-handoffs", "GET"),
+        ("/api/v1/exact-contract-handoffs/import", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/confirm", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/confirm-for-delivery", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/stop-for-reassignment", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/delivery-choices", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/delivery", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/build-evidence", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/preview-artifacts", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/publish-artifacts", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence", "POST"),
+    }
     assert routes == expected_routes
     assert not {method for _path, method in routes}.intersection({"PUT", "PATCH", "DELETE"})
     forbidden_terms = {
@@ -147,6 +156,8 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         for path, _method in routes
         for term in forbidden_terms
         if term in path.lower()
+        # This exact route exports proof for a run, not an execution capability.
+        if (term, path, _method) != ("capability", "/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence", "POST")
     }
     assert app.openapi_url is None
     assert app.docs_url is None

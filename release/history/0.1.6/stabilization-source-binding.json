@@ -1,0 +1,48 @@
+{
+  "schema": "apatch.studio.stabilization-source-binding.v1",
+  "version": "0.1.6",
+  "requirement": "SPEC-STUDIO-OSS-PUBLICATION-1#R10",
+  "source_commit": "034431f7f260db6fe970e917c0a3c7f4f26c6008",
+  "files": [
+    {
+      "path": "apatch_studio/__init__.py",
+      "sha256": "426dd8c376862caea1fe2da8282b777c216501ee3df8a428b4de9720f4fc0d3e"
+    },
+    {
+      "path": "apatch_studio/app.py",
+      "sha256": "7690f0ad9e25760f24066db29e478d411857f180710fab8f4636f3bd7fdc674a"
+    },
+    {
+      "path": "apatch_studio/document_publication_workflow.py",
+      "sha256": "cc06730a7b0d9b2389aa893d58bd4835877edee1b959725eaf3f3155ae98b721"
+    },
+    {
+      "path": "apatch_studio/envelope_tool_amendment_workflow.py",
+      "sha256": "69b7dac5431f05e924a61d53a23db3d148f95762ba96136d168d09612d426d2e"
+    },
+    {
+      "path": "apatch_studio/intake_recovery_workflow.py",
+      "sha256": "0a024926d63dd6222ba397e3f33b4a42afda69cafad72bec66a606c546c6ab07"
+    },
+    {
+      "path": "apatch_studio/ownership_handoff_workflow.py",
+      "sha256": "9ab9a65a8f44bbc998c267f51626ad53ea25c5db6a3d772890afdca6ea6c2e04"
+    },
+    {
+      "path": "apatch_studio/projection.py",
+      "sha256": "530634021289bd9336e6de6cf515b983ac79717451cd2d6a9143ca48e6b3a14e"
+    },
+    {
+      "path": "apatch_studio/run_store.py",
+      "sha256": "ab89bac22e96af55c2a844e2050d439acd54a37d8748d648da1e17f638ddd0d3"
+    },
+    {
+      "path": "apatch_studio/sdd_workflow.py",
+      "sha256": "042d4df7c5e3e5f0258e2783b8c111ba929aee12bbf5ad7934e27e0a6edd6381"
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "60eec855a78a5afa4e0d6e2a41c7ec0d9c8158d8e879680397529eabf0f7cd70"
+    }
+  ]
+}

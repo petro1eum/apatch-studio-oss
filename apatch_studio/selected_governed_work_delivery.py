@@ -123,6 +123,23 @@ def _cached_ack(root, path, entry, config):
     return ack
 
 
+def acknowledged_source(root, queued, config):
+    """Read only the receipt for this selected native source request, including on retry."""
+    try:
+        path, entry = D._find_outbox_entry(root, queued["entry_id"])
+        if entry["command"] != "source_binding" or entry["request_hash"] != queued["request_hash"]:
+            raise ValueError("selected source request changed")
+        ack = _cached_ack(root, path, entry, config)
+        if ack is None:
+            raise ValueError("selected source has no acknowledgement")
+        source = G.load_project_source_binding(root, ack["resource_id"])
+        if G.document_hash(source) != ack["resource_hash"]:
+            raise ValueError("selected source acknowledgement changed")
+        return source
+    except (G.GovernedWorkError, OSError, KeyError, ValueError) as exc:
+        raise SelectedDeliveryError() from exc
+
+
 def dispatch_selected(target_dir, *, entry_id, request_hash, key_provider,
                       expected_scope, context_guard=None, response_guard=None, http_client_factory=None):
     """Read/validate/sign/transmit only this exact queued request.

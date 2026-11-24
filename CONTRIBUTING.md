@@ -30,5 +30,13 @@ that pin when changing the SDK contract. The publish workflow deliberately
 resolves the wheel's declared dependencies from the package index, without the
 development pin: release the compatible Core to PyPI before publishing Studio.
 
+To exercise the full suite before that Core release, build the paired Core
+wheel into an empty temporary directory with `python -m pip wheel --no-deps
+-r requirements/source.txt --wheel-dir "$wheelhouse"`, then run
+`PIP_FIND_LINKS="$wheelhouse" python -m pytest -q` in the development environment.
+This proves staging installation, not index availability. The publish job tests
+without that directory and uploads only the two hash-verified assets attached
+to the matching GitHub release; it does not rebuild after approval.
+
 The browser API must remain loopback-only and fixed-purpose. Please do not add a
 generic shell, filesystem, Git or MCP relay.

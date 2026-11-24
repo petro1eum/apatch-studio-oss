@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 (release candidate)
+
+- A connected Inbox run requires both the current signed work-item acceptance
+  and the distinct signed project-source binding for the same change and performer.
+  A missing receipt leaves the assignment retryable without starting the agent.
+- Source installs use a pinned public Core revision; incompatible installations
+  can still open CLI help and receive repair instructions before accessing a workspace.
+- Publication checks open the installed browser client, preserve the historical
+  0.1.6 wheel check, and verify the exact distribution archives before upload.
+
 ## 0.1.5 — 2026-10-06
 
 - Add native fixed-ID contract preparation, read-only review and explicit owner

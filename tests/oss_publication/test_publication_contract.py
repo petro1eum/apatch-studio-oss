@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -118,3 +120,24 @@ def test_readme_describes_the_real_product_and_uses_public_links() -> None:
     assert links
     assert all(link.startswith("https://") for link in links)
     assert all("APatch_Studio" not in link for link in links)
+
+
+def test_public_qa_logs_are_exact_projections_of_immutable_originals() -> None:
+    base = "9ab564e5bcf49c66f568461d49399fff4ac68f08"
+    directory = Path("tools/cowork_handoff_qa")
+
+    def original(name):
+        return subprocess.check_output(["git", "show", f"{base}:{directory}/{name}"], cwd=ROOT)
+
+    manifest = "local-verification.actual.json"
+    raw = original(manifest)
+    assert raw == (ROOT / directory / manifest).read_bytes()
+    record = json.loads(raw)
+    for group in ("contour_tests", "existing_studio_tests", "git_package_tests"):
+        entry = record[group]
+        log = original(entry["log"])
+        assert "sha256:" + hashlib.sha256(log).hexdigest() == entry["sha256"]
+        public, count = re.subn(rb"(?m)^  (?:/[^\n:]+?)/(apatch_studio|site-packages)/", rb"  \1/", log)
+        assert count > 0
+        assert not (ROOT / directory / entry["log"]).exists()
+        assert (ROOT / directory / entry["log"].replace(".actual.log", ".public.log")).read_bytes() == public
