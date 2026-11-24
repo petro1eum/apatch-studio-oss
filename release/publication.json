@@ -28,11 +28,11 @@
     },
     {
       "command": "PIP_FIND_LINKS=<paired-core-wheel-directory> python -m pytest -q --tb=short",
-      "result": "passed: 1139 tests on macOS arm64 / Python 3.12; includes native signed receipts, refusal before launch and the historical installed Studio 0.1.6 / Core 0.8.51 judge. Candidate wheel installs inside this development suite could use the local Core wheel"
+      "result": "passed: 1139 tests on each of CPython 3.11, 3.12 and 3.13 on macOS arm64; includes native signed receipts, refusal before launch and the historical installed Studio 0.1.6 / Core 0.8.51 judge. Candidate wheel installs inside this development suite could use the local Core wheel"
     },
     {
       "command": "python -m pip check; python -I tools/check_installed_studio.py",
-      "result": "passed: exact Studio and local Core wheels in isolated site-packages; loopback OSS health, HTML, JS and CSS served. A separate Chromium interaction opened the executable plan, expanded a requirement, followed its proposal, and opened the library without console errors"
+      "result": "passed: exact Studio and local Core wheels in isolated site-packages on macOS and in an unprivileged Linux container; loopback OSS health, HTML, JS and CSS served. A separate Chromium interaction opened the executable plan, expanded a requirement, followed its proposal, and opened the library without console errors"
     }
   ],
   "staging_core": {
