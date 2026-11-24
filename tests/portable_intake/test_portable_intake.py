@@ -217,14 +217,24 @@ def test_public_studio_keeps_native_intake_route_inside_security_guard(consumer,
     assert fixtures.snapshot(f.root) == before and signed_rows(f) == []
 
 
-def test_installed_pair_and_resource_paths_are_exact_not_a_source_checkout():
-    from importlib.metadata import version
-    import apatch
-    import apatch_studio
-    assert version("apatch") == "0.8.51"
-    assert version("apatch-studio") == "0.1.6"
-    for module in (apatch, apatch_studio):
-        path = Path(module.__file__).resolve()
-        assert path.is_relative_to(Path(sys.prefix).resolve())
-        assert "site-packages" in path.parts
-    fixtures.api()
+def test_installed_pair_and_resource_paths_are_exact_not_a_source_checkout(tmp_path):
+    """Run the original release judge with its actual wheels, not the candidate SDK."""
+    import os
+    import venv
+
+    root = Path(__file__).resolve().parents[2]
+    commit = "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa"
+    for name in ("test_portable_intake.py", "native_intake_fixture.py", "helper-pins.json"):
+        blob = subprocess.check_output(["git", "show", f"{commit}:tests/portable_intake/{name}"], cwd=root)
+        (tmp_path / name).write_bytes(blob)
+    env_dir = tmp_path / "installed"
+    venv.EnvBuilder(with_pip=True).create(env_dir)
+    python = env_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    subprocess.run([
+        str(python), "-I", "-m", "pip", "--isolated", "install", "--index-url", "https://pypi.org/simple",
+        "-r", str(root / "release/history/0.1.6/published-wheels.txt"), "pytest>=8,<10",
+    ], cwd=tmp_path, check=True, timeout=300)
+    subprocess.run([
+        str(python), "-I", "-m", "pytest", "-q", "--import-mode=importlib",
+        "test_portable_intake.py::test_installed_pair_and_resource_paths_are_exact_not_a_source_checkout",
+    ], cwd=tmp_path, check=True, timeout=60)

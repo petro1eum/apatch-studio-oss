@@ -1,0 +1,39 @@
+{
+  "schema": "apatch.studio.oss-publication.v1",
+  "version": "0.1.6",
+  "source_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
+  "public_candidate_commit": "f5c755bad7b61c9dd0983cb8ec731159dc38fdfa",
+  "artifacts": [
+    {
+      "filename": "apatch_studio-0.1.6-py3-none-any.whl",
+      "sha256": "3ff19867c1284ef319c067e98ef865fc4898daa52eb2fe8a5ef2e3a513a50e9a"
+    },
+    {
+      "filename": "apatch_studio-0.1.6.tar.gz",
+      "sha256": "6467e8976a4f77b6e38d7a02df14f351104dc65ba1b7413020328e93d91fbbf8"
+    }
+  ],
+  "verification": [
+    {
+      "command": "setuptools.build_meta.build_wheel and build_sdist",
+      "result": "passed: exact native combined source; both distribution builds completed"
+    },
+    {
+      "command": "python -m twine check --strict",
+      "result": "passed: actual final wheel and sdist metadata checks"
+    },
+    {
+      "command": "python scripts/qualify_oss.py --profile standalone",
+      "result": "passed: fresh standalone canonical run bound to these exact installed Core archives and native custody; 2521 passed, one declared optional skip, 97 specifications and 538 commands; 96 conformant, one declared external unproven"
+    },
+    {
+      "command": "python -I -B -m pytest tests --import-mode=importlib",
+      "result": "passed: historical 802-case Studio evidence retained for unchanged payload; approved A/B successors have actual signed frozen SDD and accepted original41 coverage; current R10 verifies exact newly installed Studio runtime and declared two-route API; R9 current record is checked separately"
+    },
+    {
+      "command": "installed Core 0.8.51 and Studio 0.1.6 cross-package import/API verification",
+      "result": "passed: fresh isolated public qualification preflight with Core 0.8.51 and Studio 0.1.6 installed from these exact wheels; historical 802 Studio cases cover unchanged payload; approved source delta is independently native-qualified and current R10 executes against the exact newly installed Studio runtime; no fresh 802-case pair rerun is claimed"
+    }
+  ],
+  "note": "Archive and installed evidence only. No PyPI publication, live Cowork cutover, x86 qualification or new canary/rollback result is asserted. R9 finalization remains a separate native session."
+}

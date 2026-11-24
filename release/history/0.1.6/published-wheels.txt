@@ -1,0 +1,3 @@
+# The actual public PyPI wheels, not the older locally qualified archive digests.
+apatch @ https://files.pythonhosted.org/packages/d8/a4/6a8cd595db8d1c5bd008e04e04e5ba57317ffb76b1c6982ecea958dd2250/apatch-0.8.51-py3-none-any.whl#sha256=08c60467e5463641120238c3bc35a974a39ee56d1e603f8b8ed37a7ad10db9aa
+apatch-studio @ https://files.pythonhosted.org/packages/05/ad/864a575414c67c7c79c08097308703b17909a15e840a11edd190daaea135/apatch_studio-0.1.6-py3-none-any.whl#sha256=202ae512ffcaa05ed4bb15a94642ff3ca9ea963f7f0d2fadc02fa60a94fa42f8

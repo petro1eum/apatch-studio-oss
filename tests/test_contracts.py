@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import re
 import tomllib
+from pathlib import Path
 
 from apatch_studio.app import create_app
 
@@ -18,15 +18,17 @@ def test_product_boundary():
 
     assert project["license"] == "MIT"
     assert project["description"] == "Local contract-driven workspace for governing AI-agent work with APatch and TrustChain Cowork"
-    expected_sdk = "apatch[mcp]>=0.8.51" if project["version"] == "0.1.6" else "apatch[mcp]>=0.8.50" if project["version"] == "0.1.5" else "apatch[mcp]>=0.8.45"
-    assert expected_sdk in project["dependencies"]
+    assert "apatch[mcp]>=0.8.54" in project["dependencies"]
     assert "apatch studio oss" in readme
     assert "organization control plane" in readme
     assert "trustchain cowork" in readme
     assert "source code, diffs, prompts, credentials and private keys stay" in readme
-    assert readme.index("npm --prefix frontend run build") < readme.index('.venv/bin/pip install -e ".[dev]"')
     guide = (ROOT / "docs/GETTING-STARTED.md").read_text(encoding="utf-8")
     assert "APatch Studio OSS" in guide
+    assert "docs/getting-started.md#develop-from-source" in readme
+    assert guide.index("npm --prefix frontend run build") < guide.index(
+        'pip install -r requirements/source.txt -e ".[dev]"'
+    )
     assert "clean, independently installable OSS client" in rfp
     assert "mit license" in license_text
     assert not (ROOT / "apatch").exists()
@@ -113,21 +115,30 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         ("/api/v1/contract-intake/{spec_id}", "POST"),
         ("/api/v1/contract-intake/{spec_id}/approve", "POST"),
     }
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
-    if project["version"] == "0.1.6":
-        expected_routes |= {
-            ("/api/v1/specs/{spec_id}/document-publication", "GET"),
-            ("/api/v1/specs/{spec_id}/document-publication", "POST"),
-            ("/api/v1/specs/{spec_id}/document-publication/approve", "POST"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff", "GET"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff", "POST"),
-            ("/api/v1/specs/{spec_id}/ownership-handoff/approve", "POST"),
-        }
-    if project["version"] == "0.1.6":
-        expected_routes |= {
-            ("/api/v1/contract-intake/{spec_id}/recovery", "GET"),
-            ("/api/v1/contract-intake/{spec_id}/recovery/cancel", "POST"),
-        }
+    expected_routes |= {
+        ("/api/v1/specs/{spec_id}/document-publication", "GET"),
+        ("/api/v1/specs/{spec_id}/document-publication", "POST"),
+        ("/api/v1/specs/{spec_id}/document-publication/approve", "POST"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff", "GET"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff", "POST"),
+        ("/api/v1/specs/{spec_id}/ownership-handoff/approve", "POST"),
+        ("/api/v1/contract-intake/{spec_id}/recovery", "GET"),
+        ("/api/v1/contract-intake/{spec_id}/recovery/cancel", "POST"),
+        ("/api/v1/governed-work/evidence/preview", "POST"),
+        ("/api/v1/governed-work/evidence/publish", "POST"),
+        ("/api/v1/exact-contract-handoffs", "GET"),
+        ("/api/v1/exact-contract-handoffs/import", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/confirm", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/confirm-for-delivery", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/stop-for-reassignment", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/delivery-choices", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/delivery", "GET"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/build-evidence", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/preview-artifacts", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/publish-artifacts", "POST"),
+        ("/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence", "POST"),
+    }
     assert routes == expected_routes
     assert not {method for _path, method in routes}.intersection({"PUT", "PATCH", "DELETE"})
     forbidden_terms = {
@@ -145,6 +156,8 @@ def test_api_is_fixed_purpose_without_shell_or_mcp_relay(tmp_path):
         for path, _method in routes
         for term in forbidden_terms
         if term in path.lower()
+        # This exact route exports proof for a run, not an execution capability.
+        if (term, path, _method) != ("capability", "/api/v1/exact-contract-handoffs/{handoff_id}/company-capability-evidence", "POST")
     }
     assert app.openapi_url is None
     assert app.docs_url is None

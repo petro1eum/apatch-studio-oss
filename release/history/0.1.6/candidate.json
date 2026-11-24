@@ -1,0 +1,9 @@
+{
+  "schema": "apatch.studio.oss-candidate.v1",
+  "version": "0.1.6",
+  "previous_published_version": "0.1.5",
+  "source_commit": "034431f7f260db6fe970e917c0a3c7f4f26c6008",
+  "source_file": "apatch_studio/app.py",
+  "source_file_sha256": "7690f0ad9e25760f24066db29e478d411857f180710fab8f4636f3bd7fdc674a",
+  "requirement": "SPEC-STUDIO-OSS-PUBLICATION-1#R10"
+}

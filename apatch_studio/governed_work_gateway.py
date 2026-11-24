@@ -178,6 +178,7 @@ class APatchGovernedWorkGateway:
             raise GovernedWorkGatewayError("execution proposal identity is incomplete")
 
         request_key_provider = self._workspace_key_provider()
+        config = self._delivery.load_config(str(self.workspace))
         accepted = self._api.accept_execution_proposal(
             str(self.workspace),
             proposal=dict(proposal),
@@ -202,7 +203,13 @@ class APatchGovernedWorkGateway:
                 raise GovernedWorkGatewayError("APatch Change scope does not match the assignment")
         if self._domain.document_hash(change) != change_hash:
             raise GovernedWorkGatewayError("APatch Change hash does not match its document")
-        bound = self.refresh_canonical_binding(change, acceptance)
+        if (change.get("spec_id") != spec_id
+                or any(acceptance.get(field) != proposal.get(field) for field in
+                       ("intent_id", "work_item_id", "work_item_hash", "authority_version"))
+                or acceptance.get("proposal_document_hash") != self._domain.document_hash(proposal)
+                or acceptance.get("proposal_envelope_hash") != self._domain.envelope_hash(proposal)):
+            raise GovernedWorkGatewayError("APatch acceptance does not match the selected assignment")
+        bound = self._confirmed_source(change, acceptance, config)
         return {
             "status": "source_bound",
             "change_id": str(change["change_id"]),
@@ -263,6 +270,46 @@ class APatchGovernedWorkGateway:
             acceptance=exact_acceptance, change=exact_change, trusted_keys=config["binding_authority_keys"])
         return result["binding"]
 
+    def _confirmed_source(self, change, acceptance, config):
+        """The work-item receipt authorizes the assignment, not its project source."""
+        from apatch_studio.selected_governed_work_delivery import (
+            SelectedDeliveryError, acknowledged_source, dispatch_selected, qualify_native_delivery,
+        )
+
+        root = str(self.workspace)
+        def current():
+            self._workspace_key_provider()
+            if self._delivery.load_config(root) != config:
+                raise GovernedWorkGatewayError("The selected Cowork connection changed")
+
+        current()
+        work_item = self.refresh_canonical_binding(change, acceptance)
+        def same_performer(document):
+            source = self._domain.validate_project_source_binding(
+                document, change=change, trusted_authority_keys=config["binding_authority_keys"],
+            )
+            if source["actor_ref"] != work_item["actor_ref"]:
+                raise GovernedWorkGatewayError("Source and work item identify different performers")
+
+        try:
+            qualify_native_delivery()
+            current()
+            queued = self._delivery.queue_source_binding_request(root, change=change, client_id=config["client_id"])
+            result = dispatch_selected(
+                root, entry_id=queued["entry_id"], request_hash=queued["request_hash"],
+                key_provider=self._workspace_key_provider(), context_guard=current, response_guard=same_performer,
+                expected_scope={"command": "source_binding", "client_id": config["client_id"],
+                                "tenant_id": change["tenant_id"], "project_group_id": change["project_group_id"]},
+            )
+            if result.get("ok") is not True:
+                raise GovernedWorkGatewayError("The project source was not acknowledged")
+            current()
+            source = acknowledged_source(root, queued, config)
+            same_performer(source)
+            return source
+        except SelectedDeliveryError as exc:
+            raise GovernedWorkGatewayError("The exact project source receipt is unavailable") from exc
+
     def guard_execution(self, request, execution_context, sdd_execution, *, stage):
         """Revalidate external authority at start and immediately before Popen."""
         if execution_context is None:
@@ -286,7 +333,7 @@ class APatchGovernedWorkGateway:
                     matches.append((change, acceptance))
         if len(matches) != 1:
             raise GovernedWorkGatewayError("one exact native acceptance is required")
-        self.refresh_canonical_binding(*matches[0])
+        self._confirmed_source(*matches[0], self._delivery.load_config(str(self.workspace)))
 
     def _publication_context(self):
         """Pin the selected directory, current connection and physical signer."""

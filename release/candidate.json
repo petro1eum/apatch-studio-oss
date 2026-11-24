@@ -1,9 +1,9 @@
 {
   "schema": "apatch.studio.oss-candidate.v1",
-  "version": "0.1.6",
-  "previous_published_version": "0.1.5",
-  "source_commit": "034431f7f260db6fe970e917c0a3c7f4f26c6008",
-  "source_file": "apatch_studio/app.py",
-  "source_file_sha256": "7690f0ad9e25760f24066db29e478d411857f180710fab8f4636f3bd7fdc674a",
+  "version": "0.1.7",
+  "previous_published_version": "0.1.6",
+  "source_commit": "c8cc608aa4b69b6ca391b230a5c555924c435e82",
+  "source_file": "apatch_studio/governed_work_gateway.py",
+  "source_file_sha256": "ccace09a237a629a2118b1564c96008740ab333100fd071ec3d7047ab6b22be4",
   "requirement": "SPEC-STUDIO-OSS-PUBLICATION-1#R10"
 }

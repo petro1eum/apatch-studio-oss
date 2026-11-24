@@ -158,202 +158,162 @@ class GatewayWorkItemAcceptance:
 
 
 class GatewayApi:
-    def __init__(self, workspace, *, legacy=False, canonical=False):
-        self.workspace = Path(workspace)
-        self.legacy = legacy
-        self.canonical = canonical
+    def __init__(self, _workspace):
         self.events = []
-        self.sync_providers = []
-        self.change = None
-        self.change_hash = None
-        self.proposal = None
-
-    def accept_execution_proposal(self, target_dir, **request):
-        self.events.append(("accept", request))
-        proposal = request["proposal"]
-        self.proposal = proposal
-        self.change = {
-            "change_id": "apchg_" + "e" * 32,
-            "tenant_id": proposal["tenant_id"],
-            "project_group_id": proposal["project_group_id"],
-            "work_program_id": proposal["work_program_id"],
-            "work_program_hash": proposal["work_program_hash"],
-            "spec_id": request["spec_id"],
-            "spec_hash": "sha256:" + "f" * 64,
-        }
-        self.change_hash = GatewayDomain.document_hash(self.change)
-        return {
-            "ok": True,
-            "work_started": False,
-            "change": self.change,
-            "change_hash": self.change_hash,
-            "work_item_acceptance_delivery": {
-                "status": "queued" if self.canonical else "not_requested"
-            },
-            "source_binding_delivery": {
-                "status": (
-                    "superseded_by_work_item_acceptance"
-                    if self.canonical
-                    else (
-                        "not_requested"
-                        if self.legacy
-                        else "queued_after_work_item_acceptance_ack"
-                    )
-                )
-            },
-        }
-
-    def sync_governed_work(self, target_dir, **request):
-        self.sync_providers.append(request.get("request_key_provider"))
-        self.events.append(("sync", len(self.events)))
-        sync_count = sum(event[0] == "sync" for event in self.events)
-        if self.canonical and sync_count == 1:
-            binding = {
-                "binding_id": "tcawieb_" + "f" * 32,
-                "change_id": self.change["change_id"],
-                "change_hash": self.change_hash,
-                "tenant_id": self.change["tenant_id"],
-                "project_group_id": self.change["project_group_id"],
-                "work_program_id": self.change["work_program_id"],
-                "work_program_hash": self.change["work_program_hash"],
-                "work_item_id": self.proposal["work_item_id"],
-                "accepted_work_item_hash": self.proposal["work_item_hash"],
-                "accepted_authority_version": self.proposal["authority_version"],
-                "intent_id": self.proposal["intent_id"],
-            }
-            directory = (
-                GatewayDomain.governed_work_root(target_dir)
-                / "work_item_execution_bindings"
-            )
-        elif sync_count == 2:
-            binding = {
-                "binding_id": "tcpsb_" + "f" * 32,
-                "change_id": self.change["change_id"],
-                "change_hash": self.change_hash,
-                "tenant_id": self.change["tenant_id"],
-                "project_group_id": self.change["project_group_id"],
-                "work_program_id": self.change["work_program_id"],
-                "work_program_hash": self.change["work_program_hash"],
-                "spec_id": self.change["spec_id"],
-                "spec_hash": self.change["spec_hash"],
-            }
-            directory = GatewayDomain.governed_work_root(target_dir) / "bindings"
-        else:
-            return {"ok": True, "pending": 0}
-        directory.mkdir(parents=True)
-        (directory / f"{binding['binding_id']}.json").write_text(
-            json.dumps(binding), encoding="utf-8"
-        )
-        return {
-            "ok": True,
-            "pending": 1 if self.canonical and sync_count == 1 else 0,
-        }
 
 
-def test_apatch_gateway_requires_acceptance_then_source_binding_ack(tmp_path):
-    from apatch_studio.governed_work_gateway import (
-        APatchGovernedWorkGateway,
-        GovernedWorkGatewayError,
-    )
-
-    workspace = tmp_path / "gateway-workspace"
-    (workspace / ".apatch").mkdir(parents=True)
-    GatewayDelivery.config_path(workspace).write_text("{}", encoding="utf-8")
-    proposal = json.loads(fixture())
-    api = GatewayApi(workspace)
-    gateway = APatchGovernedWorkGateway(
-        workspace,
-        api=api,
-        domain=GatewayDomain,
-        delivery=GatewayDelivery,
-        identity_loader=gateway_identity_loader,
-    )
-
-    receipt = gateway.accept_and_bind(
-        proposal,
-        spec_id="SPEC-ACT-MANDATE-CHAIN-1",
-    )
-    assert [event[0] for event in api.events] == ["accept", "sync", "sync"]
-    request = api.events[0][1]
-    assert request["confirmation"] == (
-        proposal["work_item_id"] + ":" + str(proposal["authority_version"])
-    )
-    assert request["queue_source_binding"] is True
-    assert request["request_key_provider"] is GATEWAY_PROVIDER
-    assert api.sync_providers == [GATEWAY_PROVIDER, GATEWAY_PROVIDER]
-    assert request["purpose"] == (
-        "Execute the owner-selected SPEC for Cowork work item "
-        f"{proposal['work_item_id']} under execution intent {proposal['intent_id']}"
-    )
-    assert receipt["change_id"] == "apchg_" + "e" * 32
-    assert receipt["source_binding_id"] == "tcpsb_" + "f" * 32
-
-    legacy = GatewayApi(workspace, legacy=True)
-    old_gateway = APatchGovernedWorkGateway(
-        workspace,
-        api=legacy,
-        domain=GatewayDomain,
-        delivery=GatewayDelivery,
-        identity_loader=gateway_identity_loader,
-    )
-    with pytest.raises(GovernedWorkGatewayError, match="cannot complete"):
-        old_gateway.accept_and_bind(
-            proposal,
-            spec_id="SPEC-ACT-MANDATE-CHAIN-1",
-        )
-    assert [event[0] for event in legacy.events] == ["accept"]
-def test_canonical_work_item_binding_ack_precedes_local_agent_start(tmp_path):
+@pytest.fixture
+def signed_inbox(tmp_path, monkeypatch):
+    import httpx
+    from types import SimpleNamespace
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from apatch import governed_work as G, governed_work_mcp as M, work_item_acceptance as W
+    from apatch import governed_work_transport as T
     from apatch_studio.governed_work_gateway import APatchGovernedWorkGateway
 
-    workspace = tmp_path / "canonical-gateway-workspace"
-    (workspace / ".apatch").mkdir(parents=True)
-    GatewayDelivery.config_path(workspace).write_text("{}", encoding="utf-8")
-    events = []
-    runs = FakeRuns(events)
-    api = GatewayApi(workspace, canonical=True)
-    gateway = APatchGovernedWorkGateway(
-        workspace,
-        api=api,
-        domain=GatewayDomain,
-        delivery=GatewayDelivery,
-        work_item_acceptance=GatewayWorkItemAcceptance,
-        identity_loader=gateway_identity_loader,
-    )
-    manager = ExecutionIntentManager(
-        workspace,
-        run_manager=runs,
-        trust=trust(),
-        state_root=tmp_path / "canonical-gateway-state",
-        clock=lambda: datetime(2026, 8, 31, 12, 2, tzinfo=timezone.utc),
-        governed_work_gateway=gateway,
-    )
+    class Signer:
+        def __init__(self):
+            self.key = Ed25519PrivateKey.generate()
 
-    preview = manager.import_raw(fixture())
-    confirmed = manager.confirm(
-        preview["intent_id"],
-        ExecutionIntentConfirmation(
-            confirmed=True,
-            workspace_id=manager.workspace_id,
-            runner_id="codex",
-            mode="specification",
-            spec_id="SPEC-ACT-MANDATE-CHAIN-1",
-        ),
-    )
+        def sign(self, raw):
+            return self.key.sign(raw)
 
-    assert [event[0] for event in api.events] == ["accept", "sync", "sync"]
-    assert [event[0] for event in events] == ["run"]
-    assert confirmed["status"] == "consumed"
-    assert confirmed["cowork"]["status"] == "source_bound"
-    assert confirmed["cowork"]["source_binding_id"] == "tcpsb_" + "f" * 32
-    governed_root = GatewayDomain.governed_work_root(workspace)
-    assert (
-        governed_root
-        / "work_item_execution_bindings"
-        / ("tcawieb_" + "f" * 32 + ".json")
-    ).is_file()
-    assert (
-        governed_root / "bindings" / ("tcpsb_" + "f" * 32 + ".json")
-    ).is_file()
+        def get_public_key(self):
+            return self.key.public_key().public_bytes_raw()
+
+    actor, authority = Signer(), Signer()
+    proposal = json.loads(fixture())
+    workspace = tmp_path / "workspace"
+    spec_id = "SPEC-ACT-MANDATE-CHAIN-1"
+    specs = workspace / "docs" / "specs"
+    specs.mkdir(parents=True)
+    (specs / (spec_id + ".md")).write_text(
+        f"# {spec_id} -- Exact local task\n\n> **apatch artifact:** `spec:{spec_id}`\n"
+        "\n## R1 Verify selected assignment\n\nOnly work on the reviewed assignment.\n"
+        "\n(verify: python -m pytest tests/test_assignment.py)\n"
+    )
+    pins = {KEY_ID: PUBLIC_KEY, G.signer_key_id(authority): G._b64url_encode(authority.get_public_key())}
+    assert M.configure_governed_work(str(workspace), platform_url="https://platform.example",
+        client_id="apatch:test", binding_authority_keys=pins, request_key_provider=actor)["ok"]
+    now = datetime(2026, 8, 31, 12, 2, tzinfo=timezone.utc)
+    s = SimpleNamespace(events=[], fault=None, workspace=workspace, proposal=proposal, spec_id=spec_id)
+
+    class Native:
+        def accept_execution_proposal(self, root, **kwargs):
+            s.events.append(("accept", kwargs["confirmation"]))
+            assert kwargs["queue_source_binding"] is False and kwargs["request_key_provider"] is actor
+            reply = M.accept_execution_proposal(root, now=now, **kwargs)
+            if s.fault == "legacy":
+                reply.pop("proposal_acceptance", None)
+            return reply
+
+    def post(request):
+        payload = json.loads(request.content)
+        change = payload["change"]
+        path = request.url.path
+        assert request.url.host == "platform.example" and request.method == "POST"
+        assert request.headers["X-TC-Service-Key-Id"] == T.service_request_key_id(actor)
+        signed = {"schema": T.SERVICE_REQUEST_SCHEMA, "method": "POST", "path": path,
+                  "body_sha256": "sha256:" + hashlib.sha256(request.content).hexdigest(),
+                  "subject": payload["subject"], "tenant_id": payload["tenant_id"],
+                  "issued_at": int(request.headers["X-TC-Service-Issued-At"]),
+                  "expires_at": int(request.headers["X-TC-Service-Expires-At"]),
+                  "nonce": request.headers["X-TC-Service-Nonce"]}
+        actor.key.public_key().verify(base64.urlsafe_b64decode(request.headers["X-TC-Service-Signature"] + "=="),
+                                      T.SERVICE_REQUEST_DOMAIN + G.canonical_bytes(signed))
+        common = {k: change[k] for k in ("tenant_id", "project_group_id", "work_program_id", "work_program_hash", "change_id")}
+        common.update(change_hash=G.document_hash(change), actor_ref="member:" + "1" * 32)
+        if "proposal_acceptance" in payload:
+            a = payload["proposal_acceptance"]
+            assert path == f"/api/internal/client/project-groups/{a['project_group_id']}/work-items/{a['work_item_id']}/apatch-studio/acceptances"
+            s.events.append(("work_item", a["intent_id"]))
+            purpose = W.BINDING_PURPOSE
+            body = dict(common, schema=W.BINDING_SCHEMA, binding_id="tcawieb_"+"e"*32,
+                        work_item_id=a["work_item_id"], accepted_work_item_hash=a["work_item_hash"],
+                        accepted_authority_version=a["authority_version"], current_authority_version=a["authority_version"]+1,
+                        current_work_item_hash="sha256:"+"f"*64, intent_id=a["intent_id"],
+                        intent_document_hash=a["proposal_document_hash"], intent_envelope_hash=a["proposal_envelope_hash"],
+                        proposal_acceptance_hash=G.document_hash(a), binding_authority_version=1, accepted_at=a["accepted_at"])
+            if s.fault == "wrong_work_item":
+                body["work_item_id"] = "tcpwi_" + "f"*32
+        else:
+            assert path == f"/api/internal/project-groups/{change['project_group_id']}/governed-work/source-bindings"
+            s.events.append(("source", change["change_id"]))
+            if s.fault == "offline":
+                return httpx.Response(503, json={})
+            purpose = G.PLATFORM_SOURCE_BINDING_PURPOSE
+            body = dict(common, schema=G.SOURCE_BINDING_SCHEMA, binding_id="tcpsb_"+"f"*32,
+                        authority_version=1, issued_at=change["issued_at"])
+            body.update({k: change[k] for k in ("source_kind", "context_release_id", "context_release_manifest_hash",
+                                                "execution_system", "spec_id", "spec_hash", "requirement_refs")})
+            if s.fault == "other_actor":
+                body["actor_ref"] = "member:"+"9"*32
+        signature = authority.sign(G._platform_signature_payload(body, purpose=purpose))
+        if s.fault == "wrong_signature" and purpose == G.PLATFORM_SOURCE_BINDING_PURPOSE:
+            signature = bytes(64)
+        return httpx.Response(201, json={**body, "signature": {"algorithm": "Ed25519",
+            "key_id": G.signer_key_id(authority), "value": G._b64url_encode(signature)}})
+
+    client = httpx.Client
+    monkeypatch.setattr(httpx, "Client", lambda **options: client(transport=httpx.MockTransport(post), **options))
+    s.gateway = APatchGovernedWorkGateway(workspace, api=Native(), identity_loader=lambda _: GatewayIdentity(actor))
+    s.runs = FakeRuns(s.events)
+    s.manager = ExecutionIntentManager(workspace, run_manager=s.runs, trust=trust(),
+        state_root=tmp_path / "state", clock=lambda: now, governed_work_gateway=s.gateway)
+    s.intent_id = s.manager.import_raw(fixture())["intent_id"]
+    s.confirmation = ExecutionIntentConfirmation(confirmed=True, workspace_id=s.manager.workspace_id,
+        runner_id="codex", mode="specification", spec_id=spec_id)
+    return s
+
+
+@pytest.mark.parametrize("fault", ["legacy", "wrong_work_item", "wrong_signature", "other_actor", "offline"])
+def test_apatch_gateway_requires_acceptance_then_source_binding_ack(signed_inbox, fault):
+    s = signed_inbox
+    s.fault = fault
+    with pytest.raises(ExecutionIntentError) as error:
+        s.manager.confirm(s.intent_id, s.confirmation)
+    assert error.value.code == "cowork_acceptance_incomplete"
+    assert not s.runs.started
+    assert not list(s.workspace.rglob("bindings/tcpsb_*.json"))
+    assert s.manager.get(s.intent_id)["status"] == "awaiting_local_confirmation"
+    if fault in {"legacy", "wrong_work_item"}:
+        assert "source" not in [event for event, _ in s.events]
+    s.fault = None
+    completed = s.manager.confirm(s.intent_id, s.confirmation)
+    assert completed["cowork"]["source_binding_id"] == "tcpsb_" + "f"*32
+    assert [event for event, _ in s.events][-4:] == ["accept", "work_item", "source", "run"]
+
+
+def test_canonical_work_item_binding_ack_precedes_local_agent_start(signed_inbox):
+    s = signed_inbox
+    receipt = s.manager.confirm(s.intent_id, s.confirmation)
+    assert s.events[0] == ("accept", s.proposal["work_item_id"] + ":" + str(s.proposal["authority_version"]))
+    assert [event for event, _ in s.events] == ["accept", "work_item", "source", "run"]
+    assert receipt["status"] == "consumed" and receipt["cowork"]["status"] == "source_bound"
+    assert receipt["cowork"]["source_binding_id"] == "tcpsb_" + "f"*32
+    assert len(list(s.workspace.rglob("work_item_execution_bindings/tcawieb_*.json"))) == 1
+    assert len(list(s.workspace.rglob("bindings/tcpsb_*.json"))) == 1
+    with pytest.raises(ExecutionIntentError):
+        s.manager.confirm(s.intent_id, s.confirmation)
+    assert len(s.runs.started) == 1
+
+
+def test_retry_rechecks_work_item_and_validates_the_selected_cached_source(signed_inbox):
+    s = signed_inbox
+    def accept():
+        return s.gateway.accept_and_bind(s.proposal, spec_id=s.spec_id)
+
+    first = accept()
+    assert accept() == first
+    assert [event for event, _ in s.events] == ["accept", "work_item", "source", "accept", "work_item"]
+    path, = s.workspace.rglob("bindings/tcpsb_*.json")
+    record = json.loads(path.read_bytes())
+    record["signature"]["value"] = base64.urlsafe_b64encode(bytes(64)).rstrip(b"=").decode()
+    path.write_text(json.dumps(record))
+    from apatch_studio.governed_work_gateway import GovernedWorkGatewayError
+    with pytest.raises(GovernedWorkGatewayError):
+        accept()
+    assert not s.runs.started
 
 
 def test_apatch_gateway_uses_workspace_identity_despite_studio_machine_identity(

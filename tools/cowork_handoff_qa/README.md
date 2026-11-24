@@ -19,14 +19,18 @@ an arbitrary host, shell command, container, signing key or stop observation.
 
 ## Local verification
 
-Run with the installed current native SDK, not the older source checkout under
-`TASKROOT/apatch` (that checkout lacks the current source-reference resolver):
+From the Studio checkout after following the source install guide:
 
 ```sh
-cd /Users/edcher/Documents/Codex/2026-10-21/cowork-full-release/studio-residuals
-PYTHONPATH=. /Users/edcher/.local/share/apatch/runtimes/0.8.52-studio-0.1.6/bin/python -m pytest -q tools/cowork_handoff_qa/test_qa_handoff.py tools/cowork_handoff_qa/test_qa_native_lifecycle.py tools/cowork_handoff_qa/test_qa_cli_pins.py
-PYTHONPATH=. /Users/edcher/.local/share/apatch/runtimes/0.8.52-studio-0.1.6/bin/python -m pytest -q tests/test_agent_runs.py tests/test_work_handoff_stop.py tests/test_exact_source_runner_binding.py tests/test_exact_handoff_renewal.py tests/test_exact_contract_artifacts.py tests/test_cdd_transfer_runtime.py
+.venv/bin/python -m pytest -q tools/cowork_handoff_qa/test_qa_handoff.py tools/cowork_handoff_qa/test_qa_native_lifecycle.py tools/cowork_handoff_qa/test_qa_cli_pins.py
+.venv/bin/python -m pytest -q tests/test_agent_runs.py tests/test_work_handoff_stop.py tests/test_exact_source_runner_binding.py tests/test_exact_handoff_renewal.py tests/test_exact_contract_artifacts.py tests/test_cdd_transfer_runtime.py
 ```
+
+The three `*.public.log` exports omit absolute machine paths from warnings;
+no results were regenerated. `local-verification.actual.json` is unchanged and
+its filenames and digests refer to the original bytes in public commit
+`9ab564e5bcf49c66f568461d49399fff4ac68f08`. The publication test verifies
+the original digests and compares each redacted export byte for byte.
 
 The contour suite uses actual durable journals, a real local child process,
 actual Core Change/source receipts with public RFC8032 test key material, the SDK
@@ -59,13 +63,13 @@ server execution. Original stop/fence tests are preserved unchanged.
 4. Start this actual headless session with a PTY and keep it open:
 
 ```sh
-TASKROOT=/Users/edcher/Documents/Codex/2026-10-21/cowork-full-release
-PYTHONPATH="$TASKROOT/studio-residuals" \
-  /Users/edcher/.local/share/apatch/runtimes/0.8.52-studio-0.1.6/bin/python -B \
-  "$TASKROOT/studio-residuals/tools/cowork_handoff_qa/qa_native_cli.py" \
+: "${TASKROOT:?set an isolated QA task directory}"
+PYTHONPATH="$PWD" \
+  .venv/bin/python -B \
+  tools/cowork_handoff_qa/qa_native_cli.py \
   --workspace "$TASKROOT/handoff-native-qa-workspace" \
   --state-root "$TASKROOT/handoff-native-qa-state" \
-  --trust-file /Users/edcher/.config/apatch-studio/trustchain-production-exact-contract.json \
+  --trust-file "${QA_TRUST_FILE:?set the approved public trust document}" \
   --bundle "$TASKROOT/handoff-native-qa-bundle.json" \
   --requirement 'SPEC-COWORK-QA-STOP#R1'
 ```

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import email
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tarfile
 import venv
 import zipfile
+from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[2]
 PROHIBITED_MEMBERS = (
@@ -85,36 +84,11 @@ def test_isolated_wheel_serves_the_bundled_client(
         env={**os.environ, "PYTHONNOUSERSITE": "1"},
         stdout=subprocess.DEVNULL,
     )
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
-    script = r'''
-import json
-import sys
-from fastapi.testclient import TestClient
-from apatch_studio.app import create_app
-from apatch_studio.cli import _parser
-
-workspace = sys.argv[1]
-app = create_app(workspace)
-with TestClient(app, base_url="http://127.0.0.1:8765") as client:
-    health = client.get("/api/v1/health")
-    root = client.get("/")
-    asset_path = next(route.path for route in app.routes if route.path == "/assets")
-assert health.status_code == 200
-assert root.status_code == 200
-assert "__APATCH_STUDIO_SESSION__" not in root.text
-assert asset_path == "/assets"
-commands = set(_parser()._subparsers._group_actions[0].choices)
-assert commands == {"serve", "name-this-machine", "enroll"}
-print(json.dumps({"health": health.json(), "commands": sorted(commands)}))
-'''
-    completed = subprocess.run(
-        [str(python), "-I", "-c", script, str(workspace)],
+    subprocess.run(
+        [str(python), "-I", str(ROOT / "tools/check_installed_studio.py")],
         cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,
         env={**os.environ, "PYTHONNOUSERSITE": "1"},
     )
-    assert '"serve"' in completed.stdout

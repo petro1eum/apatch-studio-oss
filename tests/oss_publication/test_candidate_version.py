@@ -19,7 +19,12 @@ _REQUIREMENTS = {
     "0.1.4": "SPEC-STUDIO-READ-INDEX-1#R1",
     "0.1.5": "SPEC-STUDIO-CONTRACT-INTAKE-1#R5",
     "0.1.6": "SPEC-STUDIO-OSS-PUBLICATION-1#R10",
+    "0.1.7": "SPEC-STUDIO-OSS-PUBLICATION-1#R10",
 }
+_PACKAGE_INPUTS = (
+    "apatch_studio", "frontend", "MANIFEST.in", "pyproject.toml", "README.md", "LICENSE",
+    "requirements/source.txt",
+)
 _STABILIZATION_FILES = ('apatch_studio/__init__.py', 'apatch_studio/app.py', 'apatch_studio/document_publication_workflow.py', 'apatch_studio/envelope_tool_amendment_workflow.py', 'apatch_studio/intake_recovery_workflow.py', 'apatch_studio/ownership_handoff_workflow.py', 'apatch_studio/projection.py', 'apatch_studio/run_store.py', 'apatch_studio/sdd_workflow.py', 'pyproject.toml')
 _UI_FILES = ("frontend/src/ChangeDetailView.tsx", "frontend/src/outside-in.css")
 _INTAKE_FILES = (
@@ -74,7 +79,8 @@ def _assert_candidate_binding(root: Path) -> None:
     _git(root, "merge-base", "--is-ancestor", commit, "HEAD")
     source_file = candidate["source_file"]
     expected_file = (
-        "apatch_studio/app.py" if candidate["version"] == "0.1.6"
+        "apatch_studio/governed_work_gateway.py" if candidate["version"] == "0.1.7"
+        else "apatch_studio/app.py" if candidate["version"] == "0.1.6"
         else "apatch_studio/contract_intake_workflow.py" if candidate["version"] == "0.1.5"
         else "apatch_studio/read_index.py" if candidate["version"] == "0.1.4"
         else _UI_FILES[0] if candidate["version"] == "0.1.3"
@@ -105,10 +111,21 @@ def _assert_candidate_binding(root: Path) -> None:
         _assert_intake_binding(root, candidate)
     if candidate["version"] == "0.1.6":
         _assert_stabilization_binding(root, candidate)
+    if candidate["version"] == "0.1.7":
+        assert candidate["previous_published_version"] == "0.1.6"
+        assert "apatch[mcp]>=0.8.54" in project["dependencies"]
+        _git(root, "diff", "--exit-code", commit, "--", *_PACKAGE_INPUTS)
+        assert not _git(root, "ls-files", "--others", "--exclude-standard", "--", *_PACKAGE_INPUTS)
 
 
 def test_governed_candidate_version_is_exact_and_advances() -> None:
     _assert_candidate_binding(ROOT)
+
+
+def test_016_release_records_remain_byte_exact():
+    base = "9ab564e5bcf49c66f568461d49399fff4ac68f08"
+    for name in ("candidate.json", "publication.json", "stabilization-source-binding.json"):
+        assert (ROOT / "release/history/0.1.6" / name).read_bytes() == _git(ROOT, "show", f"{base}:release/{name}")
 
 
 def _write_json(path: Path, value: dict[str, object]) -> None:
@@ -147,6 +164,34 @@ def ui_candidate(tmp_path: Path) -> Path:
 
 def test_exact_readability_candidate_binds_both_ui_files(ui_candidate: Path) -> None:
     _assert_candidate_binding(ui_candidate)
+
+
+@pytest.mark.parametrize("fault", ["none", "runtime_drift", "frontend_drift", "new_module", "wrong_previous"])
+def test_017_candidate_binds_all_package_inputs(ui_candidate, fault):
+    root = ui_candidate
+    primary = "apatch_studio/governed_work_gateway.py"
+    (root / primary).write_text("fixture = 1\n")
+    (root / "pyproject.toml").write_text('[project]\nversion="0.1.7"\ndependencies=["apatch[mcp]>=0.8.54"]\n')
+    _git(root, "add", "--all")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c",
+         "commit.gpgsign=false", "commit", "--no-verify", "-qm", "Synthetic maintenance package")
+    _write_json(root / "release/publication.json", {"version": "0.1.6"})
+    _write_json(root / "release/candidate.json", {
+        "schema": "apatch.studio.oss-candidate.v1", "version": "0.1.7",
+        "previous_published_version": "0.1.5" if fault == "wrong_previous" else "0.1.6",
+        "source_commit": _git(root, "rev-parse", "HEAD").decode().strip(), "source_file": primary,
+        "source_file_sha256": hashlib.sha256((root / primary).read_bytes()).hexdigest(),
+        "requirement": _REQUIREMENTS["0.1.7"],
+    })
+    if fault == "none":
+        _assert_candidate_binding(root)
+        return
+    if fault in {"runtime_drift", "frontend_drift", "new_module"}:
+        changed = {"runtime_drift": primary, "frontend_drift": _UI_FILES[0],
+                   "new_module": "apatch_studio/unreviewed.py"}[fault]
+        (root / changed).write_text("unreviewed\n")
+    with pytest.raises(AssertionError):
+        _assert_candidate_binding(root)
 
 
 def test_historical_published_candidate_retains_its_exact_binding(ui_candidate: Path) -> None:
